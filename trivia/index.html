@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lilia's Birthday Trivia</title>
+<script>document.documentElement.classList.add("locked")</script>
+<style>html.locked body > *:not(#gate) { visibility:hidden; }</style>
 <style>
   :root { --bg:#1b0f3a; --tile:#5b2bb5; --tile-hover:#7a45e0; --used:#2a1a55; --gold:#ffd166; --text:#fff; }
   * { box-sizing:border-box; }
@@ -336,6 +338,10 @@ function resetBoard() {
   scores = START_SCORES.slice(); used = [new Set(), new Set()]; round = 1; build(); drawScores(); save();
 }
 build(); drawScores();
+</script>
+<script type="module">
+import { gate } from '../gate.js';
+gate(() => {});
 </script>
 </body>
 </html>
