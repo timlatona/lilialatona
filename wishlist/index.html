@@ -463,12 +463,8 @@
 
     <section id="accessPanel" class="panel" hidden>
       <h2>Who can see the list</h2>
-      <p class="muted">Add the email each person uses to sign in with Google. Lilia and Tim always have access.</p>
-      <form id="accessForm" class="row">
-        <input type="email" id="accessEmail" placeholder="name@gmail.com" required autocomplete="off" autocapitalize="off">
-        <button class="btn" type="submit">Add</button>
-      </form>
-      <ul id="accessList" class="access"></ul>
+      <p class="muted">Access for the whole site, including this list, is now managed on the home page. Lilia and Tim always have access.</p>
+      <p><a class="btn" href="/#people">Manage who has access</a></p>
     </section>
   </section>
   <footer class="site-foot" id="siteFoot"></footer>
@@ -583,9 +579,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.17',
+  number: '1.18',
   date: 'Nov 15',
-  whatsNew: 'The home page’s Manage access link opens the Access panel directly.',
+  whatsNew: 'Who can see the list is now managed on the home page, along with the rest of the site.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -831,11 +827,7 @@ function applyAuth(user) {
     renderImport();
   }, () => { profile = null; profileDenied = true; renderProfile(); renderImport(); }));
 
-  if (me.owner) {
-    unsubs.push(onValue(ref(db, 'access/emails'), (snap) => renderAccess(snap.val() || {})));
-  }
   setupChrome();
-  if (me.owner && location.hash === '#accessPanel') setTimeout(() => $('accessPanel').scrollIntoView({ behavior: 'smooth' }), 400);
 }
 
 // ---------- list ----------
@@ -1339,26 +1331,7 @@ $('importBtn').addEventListener('click', async () => {
 
 // ---------- who can see the list ----------
 
-const encodeEmail = (e) => e.toLowerCase().replaceAll('.', ',');
-const decodeEmail = (k) => k.replaceAll(',', '.');
-
-function renderAccess(emails) {
-  const keys = Object.keys(emails).filter((k) => emails[k]).sort();
-  $('accessList').replaceChildren(...(keys.length ? keys.map((k) => el('li', {},
-    el('span', { textContent: decodeEmail(k) }),
-    btn('Remove', 'small ghost', () => {
-      if (confirm(`Remove ${decodeEmail(k)}? They won't be able to see the list.`)) return remove(ref(db, `access/emails/${k}`));
-    }))) : [el('li', { className: 'muted', textContent: 'Nobody added yet.' })]));
-}
-
-$('accessForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const input = $('accessEmail');
-  const email = input.value.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || /[#$\[\]\/]/.test(email)) return input.reportValidity();
-  try { await set(ref(db, `access/emails/${encodeEmail(email)}`), true); input.value = ''; }
-  catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
-});
+// Access is managed on the home page (see /gate.js).
 </script>
 </body>
 </html>

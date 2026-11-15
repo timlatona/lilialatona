@@ -7,11 +7,11 @@
 <script>document.documentElement.classList.add("locked")</script>
 <style>html.locked body > *:not(#gate) { visibility:hidden; }</style>
 <style>
-  :root { --bg:#1b0f3a; --card:#5b2bb5; --card-hover:#7a45e0; --gold:#ffd166; --text:#fff; }
+  :root { --bg:#1b0f3a; --card:#5b2bb5; --card-hover:#7a45e0; --panel:#2a1a55; --gold:#ffd166; --text:#fff; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
          font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
-         display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 16px; }
+         display:flex; flex-direction:column; align-items:center; padding:48px 16px 32px; }
   h1 { color:var(--gold); font-size:clamp(2rem,8vw,3.5rem); margin:0 0 6px; text-align:center; }
   .hi { opacity:.8; margin:0 0 24px; text-align:center; }
   .links { display:grid; gap:14px; width:100%; max-width:420px; }
@@ -19,32 +19,146 @@
       padding:20px; text-align:center; font-size:1.3rem; font-weight:700; }
   .links a:hover, .links a:focus-visible { background:var(--card-hover); }
   .links a span { display:block; font-size:2rem; margin-bottom:4px; }
-  .links a.manage { background:transparent; border:1px dashed #fff6; font-size:1.05rem; padding:14px; }
-  .links a.manage small { display:block; font-weight:400; opacity:.75; margin-top:4px; }
   .foot { margin-top:28px; font-size:.9rem; opacity:.7; text-align:center; }
   .foot button { background:none; border:0; color:inherit; text-decoration:underline; cursor:pointer; font:inherit; }
+
+  #people { width:100%; max-width:640px; margin-top:40px; background:var(--panel); border-radius:12px; padding:20px; }
+  #people h2 { margin:0 0 4px; color:var(--gold); font-size:1.3rem; }
+  #people .muted { opacity:.75; font-size:.92rem; margin:0 0 14px; line-height:1.4; }
+  #people form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:16px; }
+  #people input[type=email] { flex:1 1 220px; min-width:0; font:inherit; padding:9px 10px; border-radius:8px; border:0; }
+  #people form label { font-size:.92rem; white-space:nowrap; }
+  #people button { font:inherit; font-weight:700; padding:9px 16px; border-radius:8px; border:0; cursor:pointer;
+                   background:var(--gold); color:#1b0f3a; }
+  #people button.ghost { background:transparent; color:#fff; border:1px solid #fff5; font-weight:400; padding:5px 10px; font-size:.85rem; }
+  .tablewrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.95rem; }
+  th, td { padding:8px 6px; border-top:1px solid #ffffff1f; text-align:center; }
+  th { font-weight:600; font-size:.85rem; opacity:.8; border-top:0; }
+  th:first-child, td:first-child { text-align:left; word-break:break-all; }
+  td input { width:18px; height:18px; cursor:pointer; }
+  td input:disabled { cursor:not-allowed; }
   [hidden] { display:none !important; }
 </style>
 </head>
 <body>
   <h1>Lilia Latona</h1>
   <p class="hi" id="hi"></p>
-  <nav class="links">
-    <a href="wishlist/"><span>🎁</span>Wishlist</a>
-    <a href="trivia/"><span>🎂</span>Birthday Trivia</a>
-    <a href="wishlist/#accessPanel" class="manage" id="manage" hidden>👥 Manage who has access
-      <small>Opens the wishlist's Access panel. Anyone added there can see this page too.</small></a>
-  </nav>
+  <nav class="links" id="links"></nav>
+
+  <section id="people" hidden>
+    <h2>👥 Who has access</h2>
+    <p class="muted" id="peopleNote"></p>
+    <form id="addForm">
+      <input type="email" id="addEmail" placeholder="name@gmail.com" required autocomplete="off" autocapitalize="off">
+      <span id="addBoxes"></span>
+      <button type="submit">Add</button>
+    </form>
+    <div class="tablewrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+  </section>
+
   <p class="foot"><span id="who"></span> · <button id="out">Sign out</button></p>
 
 <script type="module">
-import { gate, signOutAndReload } from './gate.js';
-gate((me) => {
-  document.getElementById('hi').textContent = `Hi ${me.name}!`;
-  document.getElementById('who').textContent = me.email;
-  document.getElementById('manage').hidden = !me.owner;
+import { gate, signOutAndReload, db, SECTIONS, OWNERS, encodeEmail, decodeEmail } from './gate.js';
+import { ref, onValue, set, update, remove }
+  from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
+
+const $ = (id) => document.getElementById(id);
+const h = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+let me;
+
+$('out').onclick = signOutAndReload;
+
+gate(null, (who) => {
+  me = who;
+  $('hi').textContent = `Hi ${me.name}!`;
+  $('who').textContent = me.email;
+  $('links').replaceChildren(...SECTIONS.filter((s) => me[s.key]).map((s) =>
+    h('a', { href: s.href }, h('span', { textContent: s.icon }), s.label)));
+  if (me.admin) {
+    setupPeople();
+    if (location.hash === '#people') setTimeout(() => $('people').scrollIntoView({ behavior: 'smooth' }), 300);
+  }
 });
-document.getElementById('out').onclick = signOutAndReload;
+
+// ---------- managing who has access (owners and admins) ----------
+
+// Columns: every section, then admin.
+const COLS = [...SECTIONS.map((s) => ({ key: s.key, label: s.label })), { key: 'admin', label: 'Admin' }];
+
+function setupPeople() {
+  $('people').hidden = false;
+  $('peopleNote').textContent = 'Tick what each person can see. Tim and Lilia always have everything.' +
+    (me.owner ? ' Admins can manage people too, but only you two can make someone an admin.'
+              : ' Only Tim and Lilia can change who is an admin.');
+  // New people start with every section ticked except admin.
+  $('addBoxes').replaceChildren(...COLS.filter((c) => c.key !== 'admin' || me.owner).map((c) =>
+    h('label', {}, h('input', { type: 'checkbox', id: 'add_' + c.key, checked: c.key !== 'admin' }), ' ' + c.label)));
+  $('thead').replaceChildren(h('tr', {}, h('th', { textContent: 'Email' }),
+    ...COLS.map((c) => h('th', { textContent: c.label })), h('th')));
+
+  let people = null, legacy = null;
+  onValue(ref(db, 'access/people'), (snap) => { people = snap.val() || {}; render(people); migrate(people, legacy); });
+  if (me.owner) onValue(ref(db, 'access/emails'), (snap) => { legacy = snap.val() || {}; migrate(people, legacy); });
+}
+
+// Moves anyone still on the wishlist's old list into the new table, with every section on.
+let migrating = false;
+async function migrate(people, legacy) {
+  if (!me.owner || migrating || !people || !legacy) return;
+  const changes = {};
+  for (const [k, on] of Object.entries(legacy)) {
+    if (!on) continue;
+    if (!people[k]) changes[`access/people/${k}`] = Object.fromEntries(SECTIONS.map((s) => [s.key, true]));
+    changes[`access/emails/${k}`] = null;
+  }
+  if (!Object.keys(changes).length) return;
+  migrating = true;
+  try { await update(ref(db), changes); } catch (e) { alert(`Couldn't move the old wishlist list over (${e.code || e.message}).`); }
+  migrating = false;
+}
+
+function render(people) {
+  const keys = Object.keys(people).filter((k) => !OWNERS.includes(decodeEmail(k))).sort();
+  if (!keys.length) {
+    $('tbody').replaceChildren(h('tr', {}, h('td', { colSpan: COLS.length + 2, textContent: 'Nobody added yet.' })));
+    return;
+  }
+  $('tbody').replaceChildren(...keys.map((k) => {
+    const row = people[k] || {};
+    // Admins can't change other admins (the database rules enforce this too).
+    const locked = !me.owner && row.admin === true;
+    return h('tr', {},
+      h('td', { textContent: decodeEmail(k) }),
+      ...COLS.map((c) => h('td', {}, h('input', {
+        type: 'checkbox', checked: row[c.key] === true, title: c.label,
+        disabled: locked || (c.key === 'admin' && !me.owner),
+        onchange: (e) => save(() => update(ref(db, `access/people/${k}`), { [c.key]: e.target.checked }), e.target),
+      }))),
+      h('td', {}, h('button', {
+        className: 'ghost', textContent: 'Remove', disabled: locked,
+        onclick: () => confirm(`Remove ${decodeEmail(k)}? They won't be able to see anything on the site.`)
+          && save(() => remove(ref(db, `access/people/${k}`))),
+      })));
+  }));
+}
+
+async function save(fn, box) {
+  try { await fn(); }
+  catch (e) { if (box) box.checked = !box.checked; alert(`That didn't save (${e.code || e.message}).`); }
+}
+
+$('addForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('addEmail');
+  const email = input.value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || /[#$\[\]\/]/.test(email)) return input.reportValidity();
+  if (OWNERS.includes(email)) { input.value = ''; return alert(`${email} already has full access.`); }
+  const row = Object.fromEntries(COLS.filter((c) => c.key !== 'admin' || me.owner)
+    .map((c) => [c.key, $('add_' + c.key).checked]));
+  await save(async () => { await set(ref(db, `access/people/${encodeEmail(email)}`), row); input.value = ''; });
+});
 </script>
 </body>
 </html>

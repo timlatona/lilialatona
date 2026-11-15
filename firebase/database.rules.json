@@ -1,0 +1,35 @@
+{
+  "rules": {
+    "access": {
+      ".read": "auth != null && auth.token.email_verified == true && ((auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com') || root.child('access/people').child(auth.token.email.replace('.', ',')).child('admin').val() == true)",
+      ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com')",
+      "people": {
+        "$person": {
+          ".read": "auth != null && auth.token.email_verified == true && $person == auth.token.email.replace('.', ',')",
+          ".write": "auth != null && auth.token.email_verified == true && root.child('access/people').child(auth.token.email.replace('.', ',')).child('admin').val() == true && data.child('admin').val() != true && newData.child('admin').val() != true",
+          "$section": {
+            ".validate": "newData.isBoolean()"
+          }
+        }
+      }
+    },
+    "profile": {
+      ".read": "auth != null && auth.token.email_verified == true && ((auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com') || (root.child('access/people').child(auth.token.email.replace('.', ',')).child('wishlist').val() == true || root.child('access/emails').child(auth.token.email.replace('.', ',')).val() == true))",
+      ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com')"
+    },
+    "items": {
+      ".read": "auth != null && auth.token.email_verified == true && ((auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com') || (root.child('access/people').child(auth.token.email.replace('.', ',')).child('wishlist').val() == true || root.child('access/emails').child(auth.token.email.replace('.', ',')).val() == true))",
+      "$id": {
+        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'lilialatona@gmail.com' || auth.token.email == 'latona@gmail.com')",
+        "claim": {
+          ".write": "auth != null && auth.token.email_verified == true && (root.child('access/people').child(auth.token.email.replace('.', ',')).child('wishlist').val() == true || root.child('access/emails').child(auth.token.email.replace('.', ',')).val() == true) && (!data.exists() || data.child('uid').val() == auth.uid)"
+        },
+        "picks": {
+          "$uid": {
+            ".write": "auth != null && auth.token.email_verified == true && (root.child('access/people').child(auth.token.email.replace('.', ',')).child('wishlist').val() == true || root.child('access/emails').child(auth.token.email.replace('.', ',')).val() == true) && $uid == auth.uid"
+          }
+        }
+      }
+    }
+  }
+}
