@@ -583,9 +583,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.16',
-  date: 'Nov 14',
-  whatsNew: 'Lilia’s Christmas list: her really-want picks are starred, with photos.',
+  number: '1.17',
+  date: 'Nov 15',
+  whatsNew: 'The home page’s Manage access link opens the Access panel directly.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -835,6 +835,7 @@ function applyAuth(user) {
     unsubs.push(onValue(ref(db, 'access/emails'), (snap) => renderAccess(snap.val() || {})));
   }
   setupChrome();
+  if (me.owner && location.hash === '#accessPanel') setTimeout(() => $('accessPanel').scrollIntoView({ behavior: 'smooth' }), 400);
 }
 
 // ---------- list ----------

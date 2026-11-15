@@ -4,25 +4,47 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lilia Latona</title>
+<script>document.documentElement.classList.add("locked")</script>
+<style>html.locked body > *:not(#gate) { visibility:hidden; }</style>
 <style>
   :root { --bg:#1b0f3a; --card:#5b2bb5; --card-hover:#7a45e0; --gold:#ffd166; --text:#fff; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
          font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
          display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 16px; }
-  h1 { color:var(--gold); font-size:clamp(2rem,8vw,3.5rem); margin:0 0 28px; text-align:center; }
+  h1 { color:var(--gold); font-size:clamp(2rem,8vw,3.5rem); margin:0 0 6px; text-align:center; }
+  .hi { opacity:.8; margin:0 0 24px; text-align:center; }
   .links { display:grid; gap:14px; width:100%; max-width:420px; }
-  a { display:block; background:var(--card); color:var(--text); text-decoration:none; border-radius:12px;
+  .links a { display:block; background:var(--card); color:var(--text); text-decoration:none; border-radius:12px;
       padding:20px; text-align:center; font-size:1.3rem; font-weight:700; }
-  a:hover, a:focus-visible { background:var(--card-hover); }
-  a span { display:block; font-size:2rem; margin-bottom:4px; }
+  .links a:hover, .links a:focus-visible { background:var(--card-hover); }
+  .links a span { display:block; font-size:2rem; margin-bottom:4px; }
+  .links a.manage { background:transparent; border:1px dashed #fff6; font-size:1.05rem; padding:14px; }
+  .links a.manage small { display:block; font-weight:400; opacity:.75; margin-top:4px; }
+  .foot { margin-top:28px; font-size:.9rem; opacity:.7; text-align:center; }
+  .foot button { background:none; border:0; color:inherit; text-decoration:underline; cursor:pointer; font:inherit; }
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
   <h1>Lilia Latona</h1>
+  <p class="hi" id="hi"></p>
   <nav class="links">
     <a href="wishlist/"><span>🎁</span>Wishlist</a>
     <a href="trivia/"><span>🎂</span>Birthday Trivia</a>
+    <a href="wishlist/#accessPanel" class="manage" id="manage" hidden>👥 Manage who has access
+      <small>Opens the wishlist's Access panel. Anyone added there can see this page too.</small></a>
   </nav>
+  <p class="foot"><span id="who"></span> · <button id="out">Sign out</button></p>
+
+<script type="module">
+import { gate, signOutAndReload } from './gate.js';
+gate((me) => {
+  document.getElementById('hi').textContent = `Hi ${me.name}!`;
+  document.getElementById('who').textContent = me.email;
+  document.getElementById('manage').hidden = !me.owner;
+});
+document.getElementById('out').onclick = signOutAndReload;
+</script>
 </body>
 </html>
