@@ -177,6 +177,18 @@
   .g3 { background: linear-gradient(135deg, #e6e3f7, #d3cdef); }
   .g4 { background: linear-gradient(135deg, #dcecf6, #c6dff0); }
 
+  .newtag {
+    position: absolute; top: 12px; right: 12px; z-index: 1;
+    background: #2f6fd0; color: #fff; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; box-shadow: 0 4px 10px -4px rgba(0,0,0,.35);
+  }
+  .newtag.upd { background: #fff; color: #2f6fd0; border: 1.5px solid #2f6fd0; }
+  .newpill {
+    display: inline-block; vertical-align: middle; margin: 2px 6px 2px 0; padding: 4px 11px; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: .82rem; font-weight: 600; color: #2f6fd0;
+    background: color-mix(in srgb, #2f6fd0 10%, var(--surface)); border: 1px solid color-mix(in srgb, #2f6fd0 35%, transparent);
+  }
+  .newpill[aria-pressed="true"] { background: #2f6fd0; color: #fff; }
   .ribbon {
     position: absolute; top: 12px; left: 12px; z-index: 1;
     background: var(--gold); color: #2a1f1d; font-size: .72rem; font-weight: 700; letter-spacing: .03em;
@@ -352,6 +364,7 @@
     .pic.none .emoji { font-size: 2.1rem; }
     .pic img { padding: 4px; }
     .ribbon { top: 5px; left: 5px; font-size: .6rem; padding: 2px 6px; }
+    .newtag { top: auto; bottom: 5px; left: 5px; right: auto; font-size: .58rem; padding: 2px 6px; }
     .pricetag { bottom: 5px; right: 5px; font-size: .74rem; padding: 2px 7px; }
     .stamp span { font-size: .78rem; border-width: 2px; border-radius: 6px; padding: 2px 6px; letter-spacing: .08em; }
     .body { grid-area: body; padding: 12px 14px 0 14px; gap: 2px; }
@@ -455,7 +468,7 @@
     </button>
 
     <div class="stats">
-      <div><span class="count" id="count"></span> <span class="hint" id="intro"></span></div>
+      <div><span class="count" id="count"></span> <button id="newPill" class="newpill" type="button" aria-pressed="false" hidden></button> <span class="hint" id="intro"></span></div>
       <label class="switch" id="hideTakenWrap"><input type="checkbox" id="hideTaken"> Hide taken</label>
     </div>
     <div id="items" class="grid"></div>
@@ -579,9 +592,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.18',
-  date: 'Nov 15',
-  whatsNew: 'Who can see the list is now managed on the home page, along with the rest of the site.',
+  number: '1.19',
+  date: 'Nov 21',
+  whatsNew: 'New and Updated tags show what changed since your last visit.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -669,6 +682,24 @@ let me = null;            // { uid, email, name, owner, surprise }
 let items = {};
 let filter = SECTIONS[store('wishlist.filter')] ? store('wishlist.filter') : 'all';
 let profile = null;       // { text, imported: { deck2026: true } }
+
+// "New" and "Updated" tags: anything added or changed since this person last had the
+// list open on this device. The cut-off is fixed when the tab opens, so tags survive
+// reloads and live updates. First visit on a device: the last few days count as new.
+const NEW_FALLBACK_DAYS = 3;
+let showNewOnly = false;
+const since = (() => {
+  let s = null, last = null;
+  try { s = sessionStorage.getItem('wishlist.since'); } catch (e) {}
+  try { last = Number(localStorage.getItem('wishlist.lastVisit')) || null; } catch (e) {}
+  if (s === null) {
+    s = last || Date.now() - NEW_FALLBACK_DAYS * 864e5;
+    try { sessionStorage.setItem('wishlist.since', String(s)); } catch (e) {}
+  }
+  const touch = () => { try { localStorage.setItem('wishlist.lastVisit', String(Date.now())); } catch (e) {} };
+  touch(); setInterval(touch, 60 * 1000);
+  return Number(s);
+})();
 let profileDenied = false; // true until the updated database rules are published
 let unsubs = [];
 
@@ -858,6 +889,7 @@ function setupChrome() {
   }
 }
 
+$('newPill').addEventListener('click', () => { showNewOnly = !showNewOnly; render(); scrollTo(0, 0); });
 $('hideTaken').addEventListener('change', (e) => { store('wishlist.hideTaken', e.target.checked ? '1' : '0'); render(); });
 
 function el(tag, props = {}, ...kids) {
@@ -895,13 +927,17 @@ function render() {
   const isMine = (it) => (it.claim && it.claim.uid === me.uid) || !!myPick(it);
   const held = (it) => !!it.claim || picksOf(it).length > 0;
   const attention = (it) => showClaims && isMine(it) && (it.removed || needsRecheck(it)) ? 1 : 0;
+  const fresh = all.filter((it) => isNewItem(it) || isUpdatedItem(it));
+  if (!fresh.length) showNewOnly = false;
 
   const list = every
     .filter((it) => !it.removed || (showClaims && held(it) && (isMine(it) || me.owner)))
-    .filter((it) => filter === 'all' || it.category === filter || attention(it))
+    .filter((it) => !showNewOnly || isNewItem(it) || isUpdatedItem(it))
+    .filter((it) => showNewOnly || filter === 'all' || it.category === filter || attention(it))
     .filter((it) => !(hideTaken && !it.idea && it.claim && it.claim.uid !== me.uid))
     .sort((a, b) => {
       if (attention(a) !== attention(b)) return attention(b) - attention(a);
+      if (isNewItem(a) !== isNewItem(b)) return isNewItem(a) ? -1 : 1;
       if (showClaims) {
         const ta = !a.idea && a.claim && a.claim.uid !== me.uid ? 1 : 0;
         const tb = !b.idea && b.claim && b.claim.uid !== me.uid ? 1 : 0;
@@ -915,6 +951,14 @@ function render() {
   $('count').textContent = showClaims
     ? `${all.length} wish${all.length === 1 ? '' : 'es'} · ${open} still up for grabs`
     : `${all.length} wish${all.length === 1 ? '' : 'es'} on your list`;
+  const pill = $('newPill');
+  pill.hidden = !fresh.length;
+  if (fresh.length) {
+    const n = fresh.filter(isNewItem).length, u = fresh.length - n;
+    const what = [n ? `${n} new` : '', u ? `${u} updated` : ''].filter(Boolean).join(', ');
+    pill.textContent = showNewOnly ? `Showing ${what} · Show all` : `✨ ${what} since your last visit`;
+    pill.setAttribute('aria-pressed', String(showNewOnly));
+  }
 
   const y = scrollY;
   const firstPaint = !$('items').childElementCount;
@@ -934,6 +978,10 @@ function render() {
       ? (me.owner ? 'Nothing here yet. Tap “Add a wish” to start the list.' : "Lilia hasn't added anything yet. Check back soon!")
       : 'Nothing to show for this filter.');
 }
+
+// Someone's own additions and edits are never "new" to them.
+const isNewItem = (it) => !it.removed && (it.created || 0) > since && it.by !== me.uid;
+const isUpdatedItem = (it) => !it.removed && !isNewItem(it) && (it.updated || 0) > since && it.updatedBy !== me.uid;
 
 const picksOf = (it) => Object.entries(it.picks || {}).map(([uid, p]) => ({ uid, ...p }));
 const myPick = (it) => (it.picks || {})[me.uid] || null;
@@ -962,6 +1010,8 @@ function card(it, showClaims) {
     pic.append(i);
   } else placeholder();
   if (it.top) pic.append(el('span', { className: 'ribbon', textContent: '★ Top wish' }));
+  if (isNewItem(it)) pic.append(el('span', { className: 'newtag', textContent: 'New' }));
+  else if (isUpdatedItem(it)) pic.append(el('span', { className: 'newtag upd', textContent: 'Updated' }));
   if (it.price) pic.append(el('span', { className: 'pricetag', textContent: it.price }));
   if (taken) pic.append(el('div', { className: 'stamp' }, el('span', { textContent: it.removed ? 'Removed' : 'Taken' })));
 
@@ -1201,9 +1251,9 @@ form.addEventListener('submit', async (e) => {
     if (editingId) {
       const before = items[editingId] || {};
       const changed = ['title', 'url', 'price', 'image', 'notes'].some((k) => (before[k] || '') !== data[k]);
-      await update(ref(db, `items/${editingId}`), changed ? { ...data, updated: serverTimestamp() } : data);
+      await update(ref(db, `items/${editingId}`), changed ? { ...data, updated: serverTimestamp(), updatedBy: me.uid } : data);
     }
-    else await set(push(ref(db, 'items')), { ...data, created: serverTimestamp() });
+    else await set(push(ref(db, 'items')), { ...data, created: serverTimestamp(), by: me.uid });
     dlg.close();
   } catch (err) {
     alert(`That didn't save (${err.code || err.message}).`);
@@ -1305,7 +1355,7 @@ $('importBtn').addEventListener('click', async () => {
       if (patch.image) patch.image = img(patch.image);
       // Only flag "updated since you picked this" when something a buyer relies on changed.
       const matters = ['title', 'url', 'price', 'notes'].some((k) => k in patch);
-      await update(ref(db, `items/${hit[0]}`), matters ? { ...patch, updated: serverTimestamp() } : patch);
+      await update(ref(db, `items/${hit[0]}`), matters ? { ...patch, updated: serverTimestamp(), updatedBy: me.uid } : patch);
     }
     const list = batch.items || [];
     const base = Date.now();
@@ -1320,6 +1370,7 @@ $('importBtn').addEventListener('click', async () => {
       occasion: d.occasion || 'anytime',
       image: img(d.image),
       created: base + (list.length - i),
+      by: me.uid,
     })));
     if (missed.length) alert(`Added everything, but couldn't find ${missed.map((m) => `“${m}”`).join(', ')} on the list to update. It may have been renamed or deleted.`);
   } catch (err) {
