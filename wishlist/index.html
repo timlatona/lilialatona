@@ -255,6 +255,24 @@
   .notes { color: var(--muted); font-size: .88rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .view { align-self: flex-start; margin-top: 4px; color: var(--berry); font-weight: 700; font-size: .86rem; text-decoration: none; }
   .view:hover { text-decoration: underline; }
+  .trackersum { font-weight: 700; font-size: .95rem; }
+  .trackerlist { display: flex; flex-direction: column; gap: 14px; }
+  .tgroup h3 { margin: 0 0 6px; font-family: var(--display); font-size: 1.05rem; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .tgroup h3 small { font-family: var(--sans); font-weight: 500; font-size: .8rem; color: var(--muted); }
+  .trow { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); margin-bottom: 6px; }
+  .trow .th { flex: none; width: 44px; height: 44px; border-radius: 9px; background: #fff; border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; font-size: 1.3rem; }
+  .trow .th img { width: 100%; height: 100%; object-fit: contain; }
+  .trow .tx { flex: 1; min-width: 0; }
+  .trow .tt { font-weight: 600; font-size: .92rem; line-height: 1.25; overflow-wrap: anywhere; }
+  .trow .tn { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+  .badge { flex: none; font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.bought { background: var(--pine-soft); color: var(--pine); }
+  .badge.planning { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+  .badge.gone { background: color-mix(in srgb, var(--berry) 10%, var(--surface)); color: var(--berry); margin-top: 3px; display: inline-block; }
+  .trackeropen { font-size: .88rem; }
+  .trackeropen summary { cursor: pointer; font-weight: 600; }
+  .trackeropen ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+  .tracker .seg { align-self: flex-start; }
   .optionsbtn {
     align-self: flex-start; margin-top: 4px; padding: 4px 11px; border-radius: 999px; cursor: pointer;
     font: inherit; font-size: .82rem; font-weight: 700; color: var(--berry);
@@ -504,6 +522,12 @@
       <span class="chev" aria-hidden="true">›</span>
     </button>
 
+    <button id="trackerBtn" class="sizes-btn tracker-btn" type="button" hidden>
+      <span class="ico" aria-hidden="true">🧾</span>
+      <span class="txt"><b>Gift tracker</b><small id="trackerPreview"></small></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+
     <div class="stats">
       <div><span class="count" id="count"></span> <button id="newPill" class="newpill" type="button" aria-pressed="false" hidden></button> <span class="hint" id="intro"></span></div>
       <label class="switch" id="hideTakenWrap"><input type="checkbox" id="hideTaken"> Hide taken</label>
@@ -607,6 +631,31 @@
   </div>
 </dialog>
 
+<dialog id="trackerDlg" aria-labelledby="trackerTitle">
+  <div class="sheet tracker">
+    <div>
+      <h2 id="trackerTitle">Gift tracker</h2>
+      <p class="muted">Only you can see this. Everything people have picked, and what's been bought.</p>
+    </div>
+    <div class="seg" id="trackerFilter" role="group" aria-label="Show">
+      <button class="chip" type="button" data-f="all" aria-pressed="true">All</button>
+      <button class="chip" type="button" data-f="bought" aria-pressed="false">Bought</button>
+      <button class="chip" type="button" data-f="planning" aria-pressed="false">Planning</button>
+    </div>
+    <div id="trackerSummary" class="trackersum"></div>
+    <div id="trackerList" class="trackerlist"></div>
+    <details id="trackerOpen" class="trackeropen" hidden>
+      <summary id="trackerOpenSummary"></summary>
+      <ul id="trackerOpenList"></ul>
+    </details>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="trackerCopy">Copy as text</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="trackerClose">Done</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="sizesDlg" aria-labelledby="sizesTitle">
   <div class="sheet">
     <h2 id="sizesTitle">Lilia's sizes &amp; favorites</h2>
@@ -654,12 +703,14 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.20',
+  number: '1.21',
   date: 'Nov 23',
-  whatsNew: 'Items can have several links. Look for “🔗 options” on a card.',
+  whatsNew: 'Small improvements behind the scenes.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
+// Only these accounts get the Gift tracker (everything picked and bought). Not Lilia.
+const TRACKER_EMAILS = ['latona@gmail.com'];
 // The list's owner never sees claims, so gifts stay a surprise.
 const SURPRISE_FOR = 'lilialatona@gmail.com';
 const OCCASIONS = { christmas: 'Christmas', birthday: 'Birthday' };
@@ -1039,6 +1090,8 @@ function render() {
     pill.setAttribute('aria-pressed', String(showNewOnly));
   }
 
+  renderTrackerButton();
+
   const y = scrollY;
   const firstPaint = !$('items').childElementCount;
   $('items').replaceChildren(...list.map((it, i) => {
@@ -1057,6 +1110,79 @@ function render() {
       ? (me.owner ? 'Nothing here yet. Tap “Add a wish” to start the list.' : "Lilia hasn't added anything yet. Check back soon!")
       : 'Nothing to show for this filter.');
 }
+
+// ---------- Gift tracker (only TRACKER_EMAILS) ----------
+const canTrack = () => !!me && TRACKER_EMAILS.includes(me.email);
+let trackerFilter = 'all';
+
+// One row per person per item: single-item claims and open-idea picks.
+function trackerRows() {
+  const rows = [];
+  for (const [id, it] of Object.entries(items)) {
+    if (!it || !it.title) continue;
+    const base = { id, title: it.title, price: it.price || '', image: safeUrl(it.image), removed: !!it.removed, idea: !!it.idea };
+    if (it.claim) rows.push({ ...base, uid: it.claim.uid, who: it.claim.name || 'Someone', status: it.claim.status === 'bought' ? 'bought' : 'planning', note: '' });
+    for (const p of picksOf(it)) rows.push({ ...base, uid: p.uid, who: p.name || 'Someone', status: p.status === 'bought' ? 'bought' : 'planning', note: p.note || '' });
+  }
+  return rows;
+}
+const trackerCounts = (rows) => ({ bought: rows.filter((r) => r.status === 'bought').length, planning: rows.filter((r) => r.status !== 'bought').length });
+
+function renderTrackerButton() {
+  const btnEl = $('trackerBtn');
+  btnEl.hidden = !canTrack();
+  if (!canTrack()) return;
+  const c = trackerCounts(trackerRows());
+  $('trackerPreview').textContent = c.bought + c.planning ? `${c.bought} bought · ${c.planning} planning` : 'Nothing picked yet';
+  if ($('trackerDlg').open) renderTracker();
+}
+
+function renderTracker() {
+  if (!canTrack()) return;
+  const all = trackerRows();
+  const c = trackerCounts(all);
+  $('trackerSummary').textContent = `${c.bought} bought · ${c.planning} planning · ${new Set(all.map((r) => r.uid)).size} people`;
+  for (const b of $('trackerFilter').children) b.setAttribute('aria-pressed', String(b.dataset.f === trackerFilter));
+
+  const rows = all.filter((r) => trackerFilter === 'all' || r.status === trackerFilter);
+  const byPerson = new Map();
+  for (const r of rows) { if (!byPerson.has(r.uid)) byPerson.set(r.uid, { who: r.who, rows: [] }); byPerson.get(r.uid).rows.push(r); }
+  const groups = [...byPerson.values()].sort((a, b) => a.who.localeCompare(b.who));
+  $('trackerList').replaceChildren(...(groups.length ? groups.map((g) => {
+    g.rows.sort((a, b) => (a.status === 'bought' ? 0 : 1) - (b.status === 'bought' ? 0 : 1) || a.title.localeCompare(b.title));
+    const gc = trackerCounts(g.rows);
+    return el('section', { className: 'tgroup' },
+      el('h3', {}, g.who, el('small', { textContent: [gc.bought ? `${gc.bought} bought` : '', gc.planning ? `${gc.planning} planning` : ''].filter(Boolean).join(' · ') })),
+      ...g.rows.map((r) => el('div', { className: 'trow' },
+        el('div', { className: 'th' }, r.image ? el('img', { src: r.image, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' }) : document.createTextNode(emojiFor(r.title))),
+        el('div', { className: 'tx' },
+          el('div', { className: 'tt', textContent: r.title + (r.price ? ` · ${r.price}` : '') }),
+          r.note ? el('div', { className: 'tn', textContent: r.note }) : null,
+          r.removed ? el('span', { className: 'badge gone', textContent: 'Removed from her list' }) : null),
+        el('span', { className: 'badge ' + r.status, textContent: r.status === 'bought' ? '✓ Bought' : 'Planning' }))));
+  }) : [el('p', { className: 'muted', textContent: trackerFilter === 'all' ? 'Nobody has picked anything yet.' : `Nothing marked "${trackerFilter}" yet.` })]));
+
+  // Top wishes nobody has picked yet: where the gaps are.
+  const open = Object.values(items).filter((it) => it && it.title && it.top && !it.removed && !it.claim && !picksOf(it).length);
+  $('trackerOpen').hidden = !open.length;
+  $('trackerOpenSummary').textContent = `${open.length} top wish${open.length === 1 ? '' : 'es'} nobody has picked yet`;
+  $('trackerOpenList').replaceChildren(...open.map((it) => el('li', { textContent: it.title })));
+}
+
+$('trackerBtn').addEventListener('click', () => { if (!canTrack()) return; renderTracker(); $('trackerDlg').showModal(); });
+$('trackerClose').addEventListener('click', () => $('trackerDlg').close());
+$('trackerDlg').addEventListener('click', (e) => { if (e.target === $('trackerDlg')) $('trackerDlg').close(); });
+$('trackerFilter').addEventListener('click', (e) => { const f = e.target.dataset && e.target.dataset.f; if (f) { trackerFilter = f; renderTracker(); } });
+$('trackerCopy').addEventListener('click', async () => {
+  if (!canTrack()) return;
+  const byPerson = {};
+  for (const r of trackerRows()) (byPerson[r.who] = byPerson[r.who] || []).push(r);
+  const text = Object.entries(byPerson).sort(([a], [b]) => a.localeCompare(b)).map(([who, rs]) =>
+    `${who}\n` + rs.map((r) => `  - ${r.title}${r.note ? ` (${r.note})` : ''}: ${r.status === 'bought' ? 'bought' : 'planning'}`).join('\n')).join('\n\n');
+  try { await navigator.clipboard.writeText(text); $('trackerCopy').textContent = 'Copied ✓'; }
+  catch (e) { $('trackerCopy').textContent = "Couldn't copy"; }
+  setTimeout(() => { $('trackerCopy').textContent = 'Copy as text'; }, 1800);
+});
 
 // Someone's own additions and edits are never "new" to them.
 const isNewItem = (it) => !it.removed && (it.created || 0) > since && it.by !== me.uid;
@@ -1207,11 +1333,16 @@ function ideaFoot(it) {
   if (picks.length) {
     foot.append(el('ul', { className: 'picks' }, ...picks.map((p) => el('li', { className: p.uid === me.uid ? 'mine' : '' },
       el('b', { textContent: p.uid === me.uid ? 'You:' : `${p.name || 'Someone'}:` }),
-      el('span', { textContent: p.note || 'picked one' })))));
+      el('span', { textContent: (p.note || 'picked one') + (p.uid === me.uid && p.status === 'bought' ? '  ✓ bought' : '') })))));
   }
-  foot.append(mineP
-    ? btn('Change what I’m getting', 'small', () => openPick(it))
-    : btn("I'll get one", 'soft block', () => openPick(it)));
+  if (mineP) {
+    const bar = el('div', { className: 'mine-bar' });
+    if (mineP.status !== 'bought') bar.append(btn('Mark bought', 'small green', () => update(pickRef, { status: 'bought' })));
+    bar.append(btn('Change what I’m getting', 'small', () => openPick(it)));
+    foot.append(bar);
+  } else {
+    foot.append(btn("I'll get one", 'soft block', () => openPick(it)));
+  }
   return foot;
 }
 
@@ -1242,7 +1373,8 @@ pickForm.addEventListener('submit', async (e) => {
   const save = pickForm.querySelector('[type=submit]');
   save.disabled = true;
   try {
-    await set(ref(db, `items/${pickingId}/picks/${me.uid}`), { name: me.fullName, note, at: Date.now() });
+    const prev = ((items[pickingId] || {}).picks || {})[me.uid];   // keep "bought" when only the note changes
+    await set(ref(db, `items/${pickingId}/picks/${me.uid}`), { name: me.fullName, note, at: Date.now(), ...(prev && prev.status ? { status: prev.status } : {}) });
     pickDlg.close();
     if (first) confetti(innerWidth / 2, innerHeight / 2);
   } catch (err) {
