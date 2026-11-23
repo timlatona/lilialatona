@@ -255,6 +255,42 @@
   .notes { color: var(--muted); font-size: .88rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .view { align-self: flex-start; margin-top: 4px; color: var(--berry); font-weight: 700; font-size: .86rem; text-decoration: none; }
   .view:hover { text-decoration: underline; }
+  .optionsbtn {
+    align-self: flex-start; margin-top: 4px; padding: 4px 11px; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: .82rem; font-weight: 700; color: var(--berry);
+    background: color-mix(in srgb, var(--berry) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--berry) 35%, transparent);
+  }
+  .optionsbtn:hover { background: color-mix(in srgb, var(--berry) 14%, var(--surface)); }
+  .linkhead { display: flex; gap: 12px; align-items: center; }
+  .linkthumb { flex: none; width: 64px; height: 64px; border-radius: 12px; background: #fff; border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; font-size: 1.8rem; }
+  .linkthumb img { width: 100%; height: 100%; object-fit: contain; }
+  .linkhead h2 { font-size: 1.2rem; line-height: 1.2; margin: 0; overflow-wrap: anywhere; }
+  .linkhead p, #linksNotes { margin: 2px 0 0; }
+  .linkhint { margin: 0; font-size: .88rem; font-weight: 600; }
+  .linklist { display: flex; flex-direction: column; gap: 8px; }
+  a.linkrow {
+    display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 14px; text-decoration: none; color: inherit;
+    background: var(--surface-2); border: 1px solid var(--line); transition: border-color .2s, transform .12s;
+  }
+  a.linkrow:hover { border-color: var(--berry); }
+  a.linkrow:active { transform: scale(.99); }
+  a.linkrow .lbl { font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  a.linkrow .host { color: var(--muted); font-size: .84rem; }
+  a.linkrow .go { color: var(--berry); font-weight: 700; flex: none; }
+  .links-edit { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .links-edit > label { font-weight: 700; font-size: .88rem; }
+  .linkrow-edit { display: grid; grid-template-columns: 1fr 9.5rem; gap: 8px; width: 100%; padding: 8px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+  .linkrow-edit.extra { grid-template-columns: 1fr 9.5rem auto; align-items: center; padding-right: 4px; }
+  #extraLinks { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .linkrow-edit .x { border: 0; background: none; cursor: pointer; font-size: 1.1rem; color: var(--muted); padding: 6px 8px; border-radius: 8px; }
+  .linkrow-edit .x:hover { background: var(--surface-2); color: var(--berry); }
+  @media (max-width: 480px) {
+    .linkrow-edit, .linkrow-edit.extra { grid-template-columns: 1fr auto; }
+    .linkrow-edit input:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+    .linkrow-edit.extra .x { grid-column: 2; grid-row: 1; padding: 6px 4px; }
+    .linkrow-edit { padding: 8px 8px 8px; }
+    .linkrow-edit:not(.extra) { grid-template-columns: 1fr; }
+  }
   .foot { padding: 10px 16px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .status { font-size: .88rem; font-weight: 700; flex: 1 1 100%; }
   .status.mine { color: var(--pine); }
@@ -371,6 +407,7 @@
     .card h3 { font-size: 1.04rem; }
     .notes { font-size: .84rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .view { font-size: .82rem; margin-top: 2px; }
+    .optionsbtn { font-size: .8rem; margin-top: 2px; }
     .foot { grid-area: foot; padding: 12px 12px 12px; gap: 8px; }
     .status { font-size: .85rem; }
     .btn.block { padding: 11px 18px; }
@@ -496,9 +533,15 @@
     <label>What is it?
       <input name="title" required maxlength="120" autocomplete="off" placeholder="e.g. Stanley tumbler, 40 oz">
     </label>
-    <label>Link <span class="muted">(where to buy it)</span>
-      <input name="url" type="url" placeholder="https://…" autocomplete="off" autocapitalize="off">
-    </label>
+    <div class="links-edit">
+      <label>Link <span class="muted">(where to buy it)</span></label>
+      <div class="linkrow-edit">
+        <input name="url" type="url" placeholder="https://…" autocomplete="off" autocapitalize="off" aria-label="Link">
+        <input name="urlLabel" placeholder="Label (optional)" maxlength="30" autocomplete="off" aria-label="Label for this link">
+      </div>
+      <div id="extraLinks"></div>
+      <button type="button" class="btn small" id="addLink">＋ Add another link</button>
+    </div>
     <div class="row2">
       <label>Price
         <input name="price" maxlength="20" placeholder="$25" autocomplete="off">
@@ -543,6 +586,25 @@
       <button type="submit" class="btn primary">Save</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="linksDlg" aria-labelledby="linksTitle">
+  <div class="sheet">
+    <div class="linkhead">
+      <div class="linkthumb" id="linksThumb"></div>
+      <div>
+        <h2 id="linksTitle"></h2>
+        <p class="muted" id="linksMeta"></p>
+      </div>
+    </div>
+    <p class="muted" id="linksNotes"></p>
+    <p class="linkhint">Any of these works. Pick whichever you like.</p>
+    <div id="linksList" class="linklist"></div>
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="linksClose">Done</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="sizesDlg" aria-labelledby="sizesTitle">
@@ -592,9 +654,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.19',
-  date: 'Nov 21',
-  whatsNew: 'New and Updated tags show what changed since your last visit.',
+  number: '1.20',
+  date: 'Nov 23',
+  whatsNew: 'Items can have several links. Look for “🔗 options” on a card.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -901,6 +963,23 @@ function el(tag, props = {}, ...kids) {
 function safeUrl(u) {
   try { const x = new URL(u); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : null; } catch (e) { return null; }
 }
+// An item's links: the main link (url + urlLabel) first, then any extras (links: [{url, label}]).
+const MAX_LINKS = 5;
+function linksOf(it) {
+  const out = [], seen = new Set();
+  const add = (u, label) => {
+    const href = safeUrl(u);
+    if (!href || seen.has(href) || out.length >= MAX_LINKS) return;
+    seen.add(href);
+    out.push({ href, label: String(label || '').trim(), host: storeName(href) });
+  };
+  add(it.url, it.urlLabel);
+  for (const l of Object.values(it.links || {})) if (l) add(l.url, l.label);
+  return out;
+}
+// Which places you can buy it, ignoring order and labels: used to tell if the links really changed.
+const linkSet = (it) => linksOf(it).map((l) => l.href).sort().join('\n');
+
 function storeName(u) {
   try { return new URL(u).hostname.replace(/^(www|shop|m)\./, ''); } catch (e) { return ''; }
 }
@@ -990,6 +1069,42 @@ const changedSinceClaim = (it) => !!it.claim && changedSince(it, it.claim.at);
 const needsRecheck = (it) => it.idea ? !!myPick(it) && changedSince(it, myPick(it).at) : changedSinceClaim(it) && it.claim.uid === me.uid;
 const canSeeWho = () => me.owner && !me.surprise;
 
+function linkControl(it) {
+  const ls = linksOf(it);
+  if (ls.length === 0) return null;
+  if (ls.length === 1) {
+    return el('a', { className: 'view', href: ls[0].href, target: '_blank', rel: 'noopener noreferrer',
+      textContent: `View on ${ls[0].host} ↗` });
+  }
+  const b = el('button', { className: 'optionsbtn', type: 'button', textContent: `🔗 ${ls.length} options ›` });
+  b.addEventListener('click', () => openLinks(it));
+  return b;
+}
+
+const linksDlg = $('linksDlg');
+function openLinks(it) {
+  const ls = linksOf(it);
+  const thumb = $('linksThumb');
+  const img = safeUrl(it.image);
+  thumb.replaceChildren();
+  if (img) {
+    const i = el('img', { src: img, alt: '', referrerPolicy: 'no-referrer' });
+    i.addEventListener('error', () => { thumb.replaceChildren(document.createTextNode(emojiFor(it.title + ' ' + (it.url || '')))); });
+    thumb.append(i);
+  } else thumb.append(document.createTextNode(emojiFor(it.title + ' ' + (it.url || ''))));
+  $('linksTitle').textContent = it.title;
+  $('linksMeta').textContent = it.price || '';
+  $('linksMeta').hidden = !it.price;
+  $('linksNotes').textContent = it.notes || '';
+  $('linksNotes').hidden = !it.notes;
+  $('linksList').replaceChildren(...ls.map((l) => el('a', { className: 'linkrow', href: l.href, target: '_blank', rel: 'noopener noreferrer' },
+    el('span', { className: 'lbl' }, l.label || l.host, l.label ? el('span', { className: 'host', textContent: `  ·  ${l.host}` }) : null),
+    el('span', { className: 'go', textContent: '↗' }))));
+  linksDlg.showModal();
+}
+$('linksClose').addEventListener('click', () => linksDlg.close());
+linksDlg.addEventListener('click', (e) => { if (e.target === linksDlg) linksDlg.close(); });
+
 function card(it, showClaims) {
   const mine = showClaims && !it.idea && it.claim && it.claim.uid === me.uid;
   const taken = showClaims && !it.idea && it.claim && !mine;
@@ -1020,7 +1135,7 @@ function card(it, showClaims) {
       [SECTION_LABEL[it.category], OCCASIONS[it.occasion], it.idea ? 'Open idea' : null].filter(Boolean).join(' · ') }),
     el('h3', { textContent: it.title }),
     it.notes ? el('div', { className: 'notes', textContent: it.notes }) : null,
-    url ? el('a', { className: 'view', href: url, target: '_blank', rel: 'noopener noreferrer', textContent: `View on ${storeName(url)} ↗` }) : null);
+    linkControl(it));
 
   const pickedByMe = showClaims && it.idea && !!myPick(it);
   const node = el('article', { className: 'card' + (mine || pickedByMe ? ' mine' : '') + (taken ? ' taken' : '') + (it.removed ? ' removed' : '') }, pic, body);
@@ -1211,12 +1326,53 @@ function previewImage() {
 }
 F.image.addEventListener('input', previewImage);
 
+function addLinkRow(url = '', label = '') {
+  const row = el('div', { className: 'linkrow-edit extra' });
+  const u = el('input', { type: 'url', placeholder: 'https://…', autocomplete: 'off', autocapitalize: 'off', value: url });
+  u.setAttribute('aria-label', 'Another link');
+  const l = el('input', { placeholder: 'Label (optional)', maxLength: 30, autocomplete: 'off', value: label });
+  l.setAttribute('aria-label', 'Label for this link');
+  const x = el('button', { type: 'button', className: 'x', textContent: '✕' });
+  x.setAttribute('aria-label', 'Remove this link');
+  x.addEventListener('click', () => { row.remove(); syncAddLink(); });
+  row.append(u, l, x);
+  $('extraLinks').append(row);
+  syncAddLink();
+  return u;
+}
+function syncAddLink() { $('addLink').hidden = $('extraLinks').children.length + 1 >= MAX_LINKS; }
+$('addLink').addEventListener('click', () => addLinkRow().focus());
+
+// The links typed into the editor, as { url, urlLabel, links } (bad or duplicate links dropped,
+// the first good one becomes the main link).
+function readLinks() {
+  const rows = [{ url: F.url.value, label: F.urlLabel.value },
+    ...[...$('extraLinks').children].map((r) => ({ url: r.children[0].value, label: r.children[1].value }))];
+  const seen = new Set(), good = [];
+  for (const r of rows) {
+    const href = safeUrl(r.url.trim());
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    good.push({ url: r.url.trim(), label: r.label.trim() });
+  }
+  const [first, ...rest] = good.slice(0, MAX_LINKS);
+  return {
+    url: first ? first.url : '',
+    urlLabel: first ? first.label : '',
+    links: rest.length ? rest : null,   // null removes the field in Firebase
+  };
+}
+
 function openEditor(it) {
   editingId = it ? it.id : null;
   $('editHeading').textContent = it ? 'Edit wish' : 'Add a wish';
   form.reset();
+  $('extraLinks').replaceChildren();
   F.title.value = it?.title || '';
   F.url.value = it?.url || '';
+  F.urlLabel.value = it?.urlLabel || '';
+  for (const l of Object.values(it?.links || {})) if (l) addLinkRow(l.url || '', l.label || '');
+  syncAddLink();
   F.price.value = it?.price || '';
   F.category.value = it?.category || (filter !== 'all' ? filter : 'misc');
   F.idea.checked = !!it?.idea;
@@ -1236,7 +1392,7 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const data = {
     title: F.title.value.trim(),
-    url: F.url.value.trim(),
+    ...readLinks(),
     price: F.price.value.trim(),
     category: F.category.value,
     image: F.image.value.trim(),
@@ -1250,7 +1406,9 @@ form.addEventListener('submit', async (e) => {
   try {
     if (editingId) {
       const before = items[editingId] || {};
-      const changed = ['title', 'url', 'price', 'image', 'notes'].some((k) => (before[k] || '') !== data[k]);
+      // Any added, removed or changed link counts; reordering or relabeling does not.
+      const changed = ['title', 'price', 'image', 'notes'].some((k) => (before[k] || '') !== data[k])
+        || linkSet(before) !== linkSet(data);
       await update(ref(db, `items/${editingId}`), changed ? { ...data, updated: serverTimestamp(), updatedBy: me.uid } : data);
     }
     else await set(push(ref(db, 'items')), { ...data, created: serverTimestamp(), by: me.uid });
@@ -1354,7 +1512,7 @@ $('importBtn').addEventListener('click', async () => {
       const patch = { ...u.set };
       if (patch.image) patch.image = img(patch.image);
       // Only flag "updated since you picked this" when something a buyer relies on changed.
-      const matters = ['title', 'url', 'price', 'notes'].some((k) => k in patch);
+      const matters = ['title', 'url', 'links', 'price', 'notes'].some((k) => k in patch);
       await update(ref(db, `items/${hit[0]}`), matters ? { ...patch, updated: serverTimestamp(), updatedBy: me.uid } : patch);
     }
     const list = batch.items || [];
@@ -1362,6 +1520,8 @@ $('importBtn').addEventListener('click', async () => {
     await Promise.all(list.map((d, i) => set(push(ref(db, 'items')), {
       title: d.title,
       url: d.url || '',
+      ...(d.urlLabel ? { urlLabel: d.urlLabel } : {}),
+      ...(d.links && d.links.length ? { links: d.links } : {}),
       price: d.price || '',
       notes: d.notes || '',
       category: d.category,
