@@ -255,6 +255,16 @@
   .notes { color: var(--muted); font-size: .88rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .view { align-self: flex-start; margin-top: 4px; color: var(--berry); font-weight: 700; font-size: .86rem; text-decoration: none; }
   .view:hover { text-decoration: underline; }
+  .cathint { margin: -4px 0 0; font-size: .84rem; font-weight: 600; color: var(--pine); }
+  #newCatRow input { width: 100%; }
+  .tidyrow { cursor: pointer; flex-wrap: wrap; }
+  .tidyrow input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--berry); flex: none; margin: 0; }
+  .tidyrow select { flex: none; width: 10rem; padding: 6px 8px; font-size: .85rem; }
+  .tidy .actions { position: sticky; bottom: 0; background: var(--surface); margin: 0 -2px; padding: 12px 2px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); z-index: 1; }
+  .tidyhead { margin: 10px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
+  @media (max-width: 480px) { .tidyrow select { width: 100%; } }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 60; background: var(--ink); color: var(--bg);
+    padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow-lg); animation: pop .2s ease; }
   .trackersum { font-weight: 700; font-size: .95rem; }
   .trackerlist { display: flex; flex-direction: column; gap: 14px; }
   .tgroup h3 { margin: 0 0 6px; font-family: var(--display); font-size: 1.05rem; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -510,6 +520,14 @@
     <div class="toolbar">
       <div class="seg" id="chips" role="group" aria-label="Show items for"></div>
     </div>
+    <section id="tidyPanel" class="panel import" hidden>
+      <div>
+        <h2>Tidy up categories</h2>
+        <p class="muted" id="tidyText"></p>
+      </div>
+      <button id="tidyBtn" class="btn primary" type="button">Review</button>
+    </section>
+
     <section id="importPanel" class="panel import" hidden>
       <div>
         <h2 id="importTitle">Lilia's birthday deck is ready</h2>
@@ -572,16 +590,14 @@
       <label>Price
         <input name="price" maxlength="20" placeholder="$25" autocomplete="off">
       </label>
-      <label>Section
-        <select name="category">
-          <option value="room">Room decor</option>
-          <option value="beauty">Beauty</option>
-          <option value="clothes">Clothes</option>
-          <option value="giftcards">Gift cards</option>
-          <option value="misc">Misc</option>
-        </select>
+      <label>Category
+        <select name="category" required></select>
       </label>
     </div>
+    <div id="newCatRow" hidden>
+      <input name="newCat" maxlength="24" placeholder="Name your new category" autocomplete="off" aria-label="New category name">
+    </div>
+    <p class="cathint" id="catHint" hidden></p>
     <label>Picture link <span class="muted">(long-press a product photo → Copy)</span>
       <input name="image" type="url" placeholder="https://…" autocomplete="off" autocapitalize="off">
       <div class="imgprev" id="imgPrev"><img alt="" referrerpolicy="no-referrer"></div>
@@ -632,6 +648,23 @@
     </div>
   </div>
 </dialog>
+
+<dialog id="tidyDlg" aria-labelledby="tidyTitle">
+  <div class="sheet tidy">
+    <div>
+      <h2 id="tidyTitle">Tidy up categories</h2>
+      <p class="muted">Check each one. Untick anything you want to leave where it is, or pick a different category.</p>
+    </div>
+    <div id="tidyList" class="trackerlist"></div>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="tidyCancel">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="tidyApply">Move items</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
 
 <dialog id="trackerDlg" aria-labelledby="trackerTitle">
   <div class="sheet tracker">
@@ -705,9 +738,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.22',
+  number: '1.23',
   date: 'Nov 23',
-  whatsNew: 'A “How it works” link at the bottom of the page.',
+  whatsNew: 'Pick or add a category when you list a wish, plus a quick Tidy-up for things in Misc.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -716,8 +749,84 @@ const TRACKER_EMAILS = ['latona@gmail.com'];
 // The list's owner never sees claims, so gifts stay a surprise.
 const SURPRISE_FOR = 'lilialatona@gmail.com';
 const OCCASIONS = { christmas: 'Christmas', birthday: 'Birthday' };
-const SECTIONS = { all: 'All', room: 'Room', beauty: 'Beauty', clothes: 'Clothes', giftcards: 'Gift cards', misc: 'Misc' };
-const SECTION_LABEL = { room: 'Room decor', beauty: 'Beauty', clothes: 'Clothes', giftcards: 'Gift cards', misc: 'Misc' };
+// <guesser>
+// Guess which category an item belongs in from its name, notes, link labels and store.
+// Returns a category key, or null when it can't tell. Only a guess: people always get to check it.
+const _w = (...words) => new RegExp('\\b(?:' + words.join('|') + ')\\b', 'i');
+const CAT_GUESS = {
+  giftcards: {
+    strong: _w('gift ?cards?', 'e-?gift', 'gift certificates?'),
+    weak: null, hosts: [],
+  },
+  beauty: {
+    strong: _w('skin ?care', 'serums?', 'moisturi[sz]ers?', 'cleansers?', 'toners?', 'sunscreen', 'lotions?', 'body (?:wash|scrub|butter|mist|spray|care)',
+      'shower (?:gel|foam|care)', 'shampoo', 'conditioner', 'hair ?spray', 'hair (?:oil|mask|cream|care|dryer|straightener)', 'curl (?:cream|creme|crème|refresh\\w*|spray)',
+      'cr[eè]me', 'mascara', 'eyeliner', 'eye ?shadow', 'blush', 'bronzer', 'concealer', 'foundation', 'lip(?: ?(?:gloss|balm|tint|stick|oil|liner|mask|products?))?',
+      'gloss', 'perfumes?', 'parfum', 'eau de \\w+', 'fragrance', 'cologne', 'make-?up', 'nail polish', 'face (?:mask|wash)', 'hair ?brush', 'round brush', 'detangl\\w*', 'body mist'),
+    weak: _w('skin', 'hair', 'scent', 'mist', 'balm', 'masks?', 'cream'),
+    hosts: ['sephora', 'ulta', 'glossier', 'ouai', 'rhode', 'tarte', 'elfcosmetics', 'nyxcosmetics', 'iliabeauty', 'byoma', 'pacifica', 'sundae', 'saltair', 'moroccanoil',
+      'amika', 'bumbleandbumble', 'dae', 'origins', 'treehut', 'summerfridays', 'diptyque', 'phlur', 'tangleteezer', 'drunkelephant', 'fentybeauty', 'charlottetilbury', 'rarebeauty', 'kosas', 'laneige'],
+  },
+  clothes: {
+    strong: _w('tanks?(?: tops?)?', 'crop tops?', 'tees?', 't-?shirts?', 'shirts?', 'hoodies?', 'sweatshirts?', 'sweaters?', 'cardigans?', 'jackets?', 'coats?', 'jeans', 'pants',
+      'leggings', 'shorts', 'skirts?', 'dress(?:es)?', 'cami(?:s|soles?)?', 'bralettes?', 'pajamas?', 'pjs?', 'sweatpants', 'joggers', 'socks?', 'sneakers?', 'shoes?', 'boots?', 'slippers?',
+      'sandals?', 'spezials?', 'nike pros?', 'swimsuits?', 'bikinis?'),
+    weak: _w('oversized', 'size', 'cotton', 'fleece'),
+    hosts: ['hollister', 'aerie', 'pacsun', 'brandymelville', 'americaneagle', 'ae', 'johngalt', 'tillys', 'garageclothing', 'lululemon', 'adidas', 'nike', 'ugg', 'uniqlo', 'zara', 'abercrombie', 'freepeople'],
+  },
+  room: {
+    strong: _w('candles?', 'pillows?', 'pillow ?cases?', 'blankets?', 'throws?', 'rugs?', 'posters?', 'wall (?:decor|art|hangings?)', 'decor', 'decorations?', 'frames?', 'lamps?',
+      'string lights?', 'fairy lights?', 'tapestr(?:y|ies)', 'trinket', 'dish(?:es)?', 'trays?', 'vases?', 'bedding', 'duvet', 'comforters?', 'curtains?', 'mirrors?', 'plants?',
+      'shelf|shelves', 'bunting', 'garland', 'bed ?room', 'dorm', 'for her room', 'room'),
+    weak: _w('cozy', 'wall', 'home'),
+    hosts: ['potterybarn', 'anthropologie', 'ikea', 'westelm', 'crateandbarrel', 'wayfair'],
+  },
+  accessories: {
+    strong: _w('necklaces?', 'bracelets?', 'earrings?', 'anklets?', 'jewel(?:ry|lery)', 'pendants?', 'charms?', 'watch(?:es)?', 'sunglasses', 'purses?', 'handbags?', 'bags?', 'totes?',
+      'backpacks?', 'wallets?', 'cosmetic bags?', 'make-?up bags?', 'phone cases?', 'keychains?', 'scrunchies?', 'headbands?', 'hair clips?', 'claw clips?', 'barrettes?', 'belts?', 'beanies?', 'scarf|scarves'),
+    weak: _w('gold', 'silver', 'leather'),
+    hosts: ['kendrascott', 'pandora', 'mejuri', 'coach', 'katespade', 'claires'],
+  },
+  journaling: {
+    strong: _w('journals?', 'journaling', 'notebooks?', 'planners?', 'diary|diaries', 'stickers?', 'sticker books?', 'washi', 'markers?', 'pens?', 'highlighters?', 'brush ?tips?',
+      'watercolou?rs?', 'sketch(?:book|es)?', 'paint(?:s|ing)?', 'colou?red pencils?', 'art supplies', 'crafts?', 'scrapbook(?:ing)?', 'stationery', 'notepads?', 'sticky notes',
+      'emily lex', 'natasha ahmed', 'ransom note'),
+    weak: _w('art', 'dotted', 'paper'),
+    hosts: ['michaels', 'papersource', 'leuchtturm1917', 'moleskine'],
+  },
+};
+function guessCategory(it) {
+  const title = String(it.title || '');
+  const rest = [it.notes, it.urlLabel, ...Object.values(it.links || {}).map((l) => l && l.label)].filter(Boolean).join(' ');
+  const hosts = [it.url, ...Object.values(it.links || {}).map((l) => l && l.url)].filter(Boolean).map((u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ''); } catch (e) { return ''; } });
+  const scores = {};
+  for (const [key, r] of Object.entries(CAT_GUESS)) {
+    let n = 0;
+    if (r.strong) { if (r.strong.test(title)) n += 6; if (r.strong.test(rest)) n += 3; }
+    if (r.weak) { if (r.weak.test(title)) n += 2; if (r.weak.test(rest)) n += 1; }
+    if (r.hosts.some((h) => hosts.some((x) => x === h + '.com' || x.split('.').includes(h) || x.startsWith(h + '.')))) n += 2;
+    scores[key] = n;
+  }
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [best, second] = [ranked[0], ranked[1]];
+  return best[1] >= 3 && best[1] - second[1] >= 1 ? best[0] : null;
+}
+// </guesser>
+
+// Built-in categories, in the order they show. "Misc" is always last. Anyone who edits the list
+// can add more (saved under profile/categories, so no database rule changes are needed).
+const DEFAULT_CATS = [
+  { key: 'room', label: 'Room decor', short: 'Room' },
+  { key: 'beauty', label: 'Beauty' },
+  { key: 'clothes', label: 'Clothes' },
+  { key: 'giftcards', label: 'Gift cards' },
+  { key: 'accessories', label: 'Accessories' },
+  { key: 'journaling', label: 'Journaling & art', short: 'Journaling' },
+];
+const MAX_CATS = 15;
+const catOf = (it) => it.category || 'misc';   // older items have no category: they live in Misc
+const titleize = (k) => String(k).replace(/[-_]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+const slugify = (label) => label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
 
 const $ = (id) => document.getElementById(id);
 const views = ['loading', 'signedOut', 'denied', 'list'];
@@ -795,7 +904,7 @@ function store(key, value) {
 
 let me = null;            // { uid, email, name, owner, surprise }
 let items = {};
-let filter = SECTIONS[store('wishlist.filter')] ? store('wishlist.filter') : 'all';
+let filter = store('wishlist.filter') || 'all';
 let profile = null;       // { text, imported: { deck2026: true } }
 
 // "New" and "Updated" tags: anything added or changed since this person last had the
@@ -974,6 +1083,7 @@ function applyAuth(user) {
   unsubs.push(onValue(ref(db, 'profile'), (snap) => {
     profile = snap.val() || {};
     profileDenied = false;
+    refreshCats(); renderChips();
     renderProfile();
     renderImport();
   }, () => { profile = null; profileDenied = true; renderProfile(); renderImport(); }));
@@ -995,18 +1105,48 @@ function setupChrome() {
     ? "You won't see who's getting what. It's a surprise!"
     : "Lilia can't see what's been taken.";
 
-  const chips = $('chips');
-  chips.replaceChildren();
-  for (const [key, label] of Object.entries(SECTIONS)) {
-    const b = el('button', { className: 'chip', type: 'button', textContent: label });
-    b.setAttribute('aria-pressed', String(key === filter));
-    b.addEventListener('click', () => {
-      filter = key; store('wishlist.filter', key);
-      [...chips.children].forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
-      render();
-    });
-    chips.append(b);
+  chipSig = '';
+  refreshCats();
+  renderChips();
+}
+
+// ---------- categories ----------
+let CATS = [], CAT_LABEL = {}, chipSig = '';
+
+// Built-ins, then ones people added, then any that only exist on items, then Misc.
+function refreshCats() {
+  const out = [...DEFAULT_CATS];
+  const have = new Set(['misc', ...out.map((c) => c.key)]);
+  const custom = Object.entries((profile && profile.categories) || {})
+    .filter(([k, v]) => v && v.label && !have.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+  for (const [k, v] of custom) { out.push({ key: k, label: String(v.label).slice(0, 24) }); have.add(k); }
+  for (const it of Object.values(items || {})) {
+    const k = it && it.category;
+    if (k && !have.has(k)) { out.push({ key: k, label: titleize(k) }); have.add(k); }   // never leave an item unreachable
   }
+  out.push({ key: 'misc', label: 'Misc' });
+  CATS = out; CAT_LABEL = Object.fromEntries(out.map((c) => [c.key, c.label]));
+}
+
+// The filter buttons: everyone sees categories that have items; owners see them all.
+function renderChips() {
+  if (!me) return;
+  const counts = {};
+  for (const it of Object.values(items || {})) if (it && it.title && !it.removed) counts[catOf(it)] = (counts[catOf(it)] || 0) + 1;
+  if (filter !== 'all' && !CAT_LABEL[filter]) filter = 'all';
+  const list = [{ key: 'all', label: 'All' },
+    ...CATS.filter((c) => me.owner || counts[c.key] || c.key === filter).map((c) => ({ key: c.key, label: c.short || c.label }))];
+  const sig = list.map((c) => c.key + ':' + c.label).join('|') + '#' + filter;
+  if (sig === chipSig) return;
+  chipSig = sig;
+  const chips = $('chips'), scroll = chips.scrollLeft;
+  chips.replaceChildren(...list.map((c) => {
+    const b = el('button', { className: 'chip', type: 'button', textContent: c.label });
+    b.setAttribute('aria-pressed', String(c.key === filter));
+    b.addEventListener('click', () => { filter = c.key; store('wishlist.filter', c.key); chipSig = ''; renderChips(); render(); });
+    return b;
+  }));
+  chips.scrollLeft = scroll;
 }
 
 $('newPill').addEventListener('click', () => { showNewOnly = !showNewOnly; render(); scrollTo(0, 0); });
@@ -1057,6 +1197,7 @@ const emojiFor = (t) => (EMOJI.find(([re]) => re.test(t)) || [, '🎁'])[1];
 
 function render() {
   if (!me) return;
+  refreshCats();
   const showClaims = !me.surprise;
   const hideTaken = showClaims && $('hideTaken').checked;
   const every = Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title);
@@ -1070,7 +1211,7 @@ function render() {
   const list = every
     .filter((it) => !it.removed || (showClaims && held(it) && (isMine(it) || me.owner)))
     .filter((it) => !showNewOnly || isNewItem(it) || isUpdatedItem(it))
-    .filter((it) => showNewOnly || filter === 'all' || it.category === filter || attention(it))
+    .filter((it) => showNewOnly || filter === 'all' || catOf(it) === filter || attention(it))
     .filter((it) => !(hideTaken && !it.idea && it.claim && it.claim.uid !== me.uid))
     .sort((a, b) => {
       if (attention(a) !== attention(b)) return attention(b) - attention(a);
@@ -1098,6 +1239,8 @@ function render() {
   }
 
   renderTrackerButton();
+  renderChips();
+  renderTidy();
 
   const y = scrollY;
   const firstPaint = !$('items').childElementCount;
@@ -1265,7 +1408,7 @@ function card(it, showClaims) {
 
   const body = el('div', { className: 'body' },
     el('span', { className: 'occasion', textContent:
-      [SECTION_LABEL[it.category], OCCASIONS[it.occasion], it.idea ? 'Open idea' : null].filter(Boolean).join(' · ') }),
+      [CAT_LABEL[catOf(it)] || titleize(catOf(it)), OCCASIONS[it.occasion], it.idea ? 'Open idea' : null].filter(Boolean).join(' · ') }),
     el('h3', { textContent: it.title }),
     it.notes ? el('div', { className: 'notes', textContent: it.notes }) : null,
     linkControl(it));
@@ -1513,7 +1656,7 @@ function openEditor(it) {
   for (const l of Object.values(it?.links || {})) if (l) addLinkRow(l.url || '', l.label || '');
   syncAddLink();
   F.price.value = it?.price || '';
-  F.category.value = it?.category || (filter !== 'all' ? filter : 'misc');
+  setupCategoryField(it);
   F.idea.checked = !!it?.idea;
   F.image.value = it?.image || '';
   F.notes.value = it?.notes || '';
@@ -1527,22 +1670,85 @@ $('addBtn').addEventListener('click', () => openEditor(null));
 $('editCancel').addEventListener('click', () => dlg.close());
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 
+// The category dropdown: every category, plus "New category…". New wishes get a guess from
+// what's typed so far; people can always change it.
+let catTouched = false, catDefault = '', guessShown = false, guessTimer = 0;
+function fillCatSelect(selected) {
+  const sel = F.category;
+  sel.replaceChildren();
+  const ph = new Option('Choose a category…', '', true, true); ph.disabled = true; sel.append(ph);
+  for (const c of CATS) sel.append(new Option(c.label, c.key));
+  sel.append(new Option('＋ New category…', '__new'));
+  sel.value = selected || '';
+}
+function showCatHint(text) { const h = $('catHint'); h.textContent = text || ''; h.hidden = !text; }
+function setupCategoryField(it) {
+  refreshCats();
+  catTouched = false; guessShown = false; showCatHint('');
+  catDefault = it ? catOf(it) : (filter !== 'all' && CAT_LABEL[filter] ? filter : '');
+  fillCatSelect(catDefault);
+  $('newCatRow').hidden = true; F.newCat.required = false; F.newCat.value = '';
+}
+function autoGuess() {
+  if (catTouched || editingId) return;
+  const extra = [...$('extraLinks').children].map((r) => ({ url: r.children[0].value, label: r.children[1].value }));
+  const key = guessCategory({ title: F.title.value, notes: F.notes.value, url: F.url.value, urlLabel: F.urlLabel.value, links: extra });
+  if (key && CAT_LABEL[key]) {
+    F.category.value = key; guessShown = true;
+    showCatHint(`Picked ${CAT_LABEL[key]} for you. Change it if that's wrong.`);
+  } else if (guessShown) {
+    F.category.value = catDefault; guessShown = false; showCatHint('');
+  }
+}
+form.addEventListener('input', (e) => {
+  if (['title', 'url', 'urlLabel', 'notes'].includes(e.target.name) || e.target.closest('#extraLinks')) {
+    clearTimeout(guessTimer); guessTimer = setTimeout(autoGuess, 200);
+  }
+});
+F.category.addEventListener('change', () => {
+  catTouched = true; showCatHint('');
+  const isNew = F.category.value === '__new';
+  $('newCatRow').hidden = !isNew; F.newCat.required = isNew;
+  if (isNew) F.newCat.focus();
+});
+
+// Make a new category if asked (reusing one with the same name), and return the key to save.
+async function resolveCategory() {
+  const v = F.category.value;
+  if (v !== '__new') return v;
+  const label = F.newCat.value.trim().replace(/\s+/g, ' ');
+  const fail = (msg) => Object.assign(new Error(msg), { userMessage: msg });
+  if (!label) throw fail('Type a name for the new category.');
+  const norm = label.toLowerCase();
+  const hit = CATS.find((c) => c.label.toLowerCase() === norm || (c.short || '').toLowerCase() === norm);
+  if (hit) return hit.key;
+  if (CATS.length - 1 >= MAX_CATS) throw fail(`That's already ${MAX_CATS} categories. Reuse one of them for now.`);
+  const taken = new Set(CATS.map((c) => c.key));
+  const base = slugify(label) || 'category';
+  let key = base, n = 2;
+  while (taken.has(key)) key = `${base}-${n++}`;
+  await set(ref(db, `profile/categories/${key}`), { label: label.slice(0, 24), at: Date.now() });
+  return key;
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const data = {
-    title: F.title.value.trim(),
-    ...readLinks(),
-    price: F.price.value.trim(),
-    category: F.category.value,
-    image: F.image.value.trim(),
-    notes: F.notes.value.trim(),
-    top: F.top.checked,
-    idea: F.idea.checked,
-  };
-  if (!data.title) return;
+  const title = F.title.value.trim();
+  if (!title) return;
   const save = form.querySelector('[type=submit]');
   save.disabled = true;
   try {
+    const category = await resolveCategory();
+    const data = {
+      title,
+      ...readLinks(),
+      price: F.price.value.trim(),
+      category,
+      image: F.image.value.trim(),
+      notes: F.notes.value.trim(),
+      top: F.top.checked,
+      idea: F.idea.checked,
+    };
     if (editingId) {
       const before = items[editingId] || {};
       // Any added, removed or changed link counts; reordering or relabeling does not.
@@ -1553,10 +1759,72 @@ form.addEventListener('submit', async (e) => {
     else await set(push(ref(db, 'items')), { ...data, created: serverTimestamp(), by: me.uid });
     dlg.close();
   } catch (err) {
-    alert(`That didn't save (${err.code || err.message}).`);
+    alert(err.userMessage || `That didn't save (${err.code || err.message}).`);
   } finally {
     save.disabled = false;
   }
+});
+
+// ---------- tidy up categories (owners): move things out of Misc, with a review first ----------
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2600);
+}
+const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc');
+
+function renderTidy() {
+  const panel = $('tidyPanel');
+  if (!me || !me.owner) { panel.hidden = true; return; }
+  const n = tidyItems().filter((it) => guessCategory(it)).length;
+  panel.hidden = n === 0;
+  if (n) $('tidyText').textContent = `${n} thing${n === 1 ? '' : 's'} in Misc look like ${n === 1 ? 'it belongs' : 'they belong'} somewhere else. Review ${n === 1 ? 'it' : 'them'}, then move ${n === 1 ? 'it' : 'them all'} in one tap.`;
+}
+
+let tidyRows = [];
+function updateTidyCount() {
+  const n = tidyRows.filter((r) => r.check.checked && r.sel.value !== 'misc').length;
+  $('tidyApply').textContent = n ? `Move ${n} item${n === 1 ? '' : 's'}` : 'Nothing to move';
+  $('tidyApply').disabled = !n;
+}
+function tidyRow(it, guess) {
+  const img = safeUrl(it.image);
+  const check = el('input', { type: 'checkbox', checked: !!guess });
+  const sel = el('select');
+  for (const c of CATS) sel.append(new Option(c.label, c.key));
+  sel.value = guess || 'misc';
+  const note = el('div', { className: 'tn' });
+  const setNote = () => { note.textContent = sel.value === 'misc' ? 'Stays in Misc' : `Misc → ${CAT_LABEL[sel.value]}`; };
+  setNote();
+  sel.addEventListener('change', () => { check.checked = sel.value !== 'misc'; setNote(); updateTidyCount(); });
+  check.addEventListener('change', updateTidyCount);
+  tidyRows.push({ id: it.id, check, sel });
+  return el('label', { className: 'trow tidyrow' }, check,
+    el('div', { className: 'th' }, img ? el('img', { src: img, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' }) : document.createTextNode(emojiFor(it.title))),
+    el('div', { className: 'tx' }, el('div', { className: 'tt', textContent: it.title }), note), sel);
+}
+$('tidyBtn').addEventListener('click', () => {
+  refreshCats();
+  const all = tidyItems().map((it) => ({ it, guess: guessCategory(it) }));
+  const list = $('tidyList');
+  list.replaceChildren(); tidyRows = [];
+  for (const { it, guess } of all.filter((x) => x.guess)) list.append(tidyRow(it, guess));
+  const unsure = all.filter((x) => !x.guess);
+  if (unsure.length) list.append(el('div', { className: 'tidyhead', textContent: "Couldn't tell. Pick one if you like." }));
+  for (const { it } of unsure) list.append(tidyRow(it, null));
+  updateTidyCount();
+  $('tidyDlg').showModal();
+});
+$('tidyCancel').addEventListener('click', () => $('tidyDlg').close());
+$('tidyDlg').addEventListener('click', (e) => { if (e.target === $('tidyDlg')) $('tidyDlg').close(); });
+$('tidyApply').addEventListener('click', async () => {
+  // Only the category changes, so nobody gets an "Updated since you picked this" notice.
+  const updates = {};
+  for (const r of tidyRows) if (r.check.checked && r.sel.value !== 'misc') updates[`${r.id}/category`] = r.sel.value;
+  const n = Object.keys(updates).length;
+  if (!n) return;
+  const b = $('tidyApply'); b.disabled = true;
+  try { await update(ref(db, 'items'), updates); $('tidyDlg').close(); toast(`Moved ${n} item${n === 1 ? '' : 's'} ✓`); }
+  catch (err) { alert(`That didn't save (${err.code || err.message}).`); b.disabled = false; }
 });
 
 // ---------- sizes & favorites ----------
@@ -1663,7 +1931,7 @@ $('importBtn').addEventListener('click', async () => {
       ...(d.links && d.links.length ? { links: d.links } : {}),
       price: d.price || '',
       notes: d.notes || '',
-      category: d.category,
+      category: d.category || 'misc',
       idea: !!d.idea,
       top: !!d.top,
       occasion: d.occasion || 'anytime',
