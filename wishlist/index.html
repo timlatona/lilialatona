@@ -543,7 +543,7 @@
     </div>
     <section id="askPanel" class="panel import ask" hidden>
       <form id="askForm">
-        <p class="askkicker">✨ Quick one for today</p>
+        <p class="askkicker" id="askKicker"></p>
         <h2 id="askQ"></h2>
         <input id="askA" maxlength="80" autocomplete="off" placeholder="Your answer" aria-label="Your answer">
         <div class="askbtns">
@@ -813,7 +813,7 @@ const db = getDatabase(app);
 const VERSION = {
   number: '1.26',
   date: 'Nov 23',
-  whatsNew: 'A quick question now and then, so your favorites build up in one place.',
+  whatsNew: 'A couple of quick questions each day, so your favorites build up in one place.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -1375,14 +1375,27 @@ function render() {
       : 'Nothing to show for this filter.');
 }
 
-// ---------- favorites: one quick question a day for Lilia ----------
+// ---------- favorites: two quick questions a day for Lilia ----------
 // Answers live at profile/favorites/<key> = { a: 'answer', at: time }. Owners can write profile/ and
 // everyone on the list can read it, so no database rule changes are needed. To add or reorder
-// questions, edit this list.
+// questions, edit this list (they're asked in this order; her three picks first, then the ones that
+// help most with gift ideas).
+const FAV_PER_DAY = 2;   // answers needed each day; skipping doesn't count
 const FAV_Q = [
   { key: 'restaurant', label: 'Restaurant', q: "What's your favorite restaurant?" },
   { key: 'salty', label: 'Salty snack', q: "What's your favorite salty snack?" },
   { key: 'hairties', label: 'Hair ties', q: 'What kind of hair ties do you like best?' },
+  { key: 'giftcard', label: 'Gift card spot', q: 'If someone gave you a gift card, where would you spend it first?' },
+  { key: 'sweats', label: 'Hoodie or sweats brand', q: 'What brand of hoodies or sweats do you like most?' },
+  { key: 'under10', label: 'Under $10', q: "What's a gift under $10 you'd love?" },
+  { key: 'wanted', label: 'Wanted for ages', q: "What's something you've wanted for ages?" },
+  { key: 'jewelry', label: 'Jewelry style', q: 'What jewelry style do you like (gold, silver, colorful, dainty)?' },
+  { key: 'socks', label: 'Socks', q: "What's your favorite kind of socks?" },
+  { key: 'pen', label: 'Pen or marker', q: "What's your favorite pen or marker?" },
+  { key: 'skincare', label: 'Skincare or body product', q: "What's a skincare or body product you'd happily get again?" },
+  { key: 'bag', label: 'Bag brand', q: 'What bag or backpack brand do you like?' },
+  { key: 'lovedgift', label: 'A gift she still loves', q: "What's a gift you got once and still love?" },
+  { key: 'notgift', label: 'Rather not get', q: "Is there something you'd rather NOT get as a gift?" },
   { key: 'candy', label: 'Candy', q: "What's your favorite candy?" },
   { key: 'drink', label: 'Drink order', q: "What's your go-to drink order (boba, coffee, anything)?" },
   { key: 'icecream', label: 'Ice cream', q: "What's your favorite ice cream flavor?" },
@@ -1391,17 +1404,31 @@ const FAV_Q = [
   { key: 'nails', label: 'Nail polish', q: "What's your favorite nail polish color?" },
   { key: 'lips', label: 'Lip balm or gloss', q: "What's your favorite lip balm or gloss?" },
   { key: 'store', label: 'Store', q: "What's your favorite store to shop at?" },
+  { key: 'dayMaker', label: 'Day-maker', q: "What's a small thing that would make your day?" },
+  { key: 'fastfood', label: 'Fast food', q: "What's your go-to fast-food order?" },
+  { key: 'pizza', label: 'Pizza topping', q: "What's your favorite pizza topping?" },
+  { key: 'dessert', label: 'Sweet treat', q: "What's your favorite dessert or sweet treat?" },
+  { key: 'comfort', label: 'Comfort food', q: "What's your comfort food on a bad day?" },
   { key: 'song', label: 'Song right now', q: "What's your favorite song right now?" },
   { key: 'show', label: 'Show or movie', q: "What's your favorite show or movie?" },
+  { key: 'movie', label: 'Movie to rewatch', q: "What's a movie you'd happily watch again?" },
   { key: 'book', label: 'Book', q: "What's your favorite book?" },
-  { key: 'under10', label: 'Under $10', q: "What's a gift under $10 you'd love?" },
-  { key: 'wanted', label: 'Wanted for ages', q: "What's something you've wanted for ages?" },
-  { key: 'dayMaker', label: 'Day-maker', q: "What's a small thing that would make your day?" },
+  { key: 'band', label: 'Band or artist', q: "Who's your favorite band or artist?" },
+  { key: 'game', label: 'Game or app', q: "What's your favorite game or app right now?" },
+  { key: 'emoji', label: 'Emoji', q: "What's your favorite emoji?" },
+  { key: 'season', label: 'Season', q: "What's your favorite season?" },
+  { key: 'dayoff', label: 'Day off', q: "What's your favorite thing to do on a day off?" },
+  { key: 'hangout', label: 'Hangout spot', q: 'Where do you like to hang out with friends?' },
 ];
 const favAnswers = () => (profile && profile.favorites) || {};
 const favText = (key) => String((favAnswers()[key] || {}).a || '').trim();
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const skippedFavs = () => { try { return JSON.parse(store('wishlist.favSkipped') || '[]'); } catch (e) { return []; } };
+// Skipping means "not today": skipped questions go to the back of the line, and tomorrow they get another chance.
+const skippedFavs = () => { try { const d = JSON.parse(store('wishlist.favSkipped') || 'null'); return d && d.day === todayStr() ? d.keys : []; } catch (e) { return []; } };
+const setSkippedFavs = (keys) => store('wishlist.favSkipped', JSON.stringify({ day: todayStr(), keys }));
+// How many she has answered today on this device (answering in the Favorite things popup doesn't count).
+const favToday = () => { try { const d = JSON.parse(store('wishlist.favDay') || 'null'); return d && d.day === todayStr() ? d.n : 0; } catch (e) { return 0; } };
+const setFavToday = (n) => store('wishlist.favDay', JSON.stringify({ day: todayStr(), n }));
 
 // The next question to ask: the first unanswered one she hasn't skipped (skipped ones come back last).
 function nextFavQuestion() {
@@ -1412,25 +1439,33 @@ function nextFavQuestion() {
 }
 function renderAsk() {
   const panel = $('askPanel');
-  const q = me && me.surprise && profile && !profileDenied && store('wishlist.askedDay') !== todayStr() ? nextFavQuestion() : null;
+  const n = favToday();
+  const q = me && me.surprise && profile && !profileDenied && n < FAV_PER_DAY ? nextFavQuestion() : null;
   panel.hidden = !q;
   if (!q) return;
+  $('askKicker').textContent = `✨ Today's questions · ${n + 1} of ${FAV_PER_DAY}`;
   if (panel.dataset.key !== q.key) { panel.dataset.key = q.key; $('askQ').textContent = q.q; $('askA').value = ''; }
 }
-function doneAsking() { store('wishlist.askedDay', todayStr()); $('askPanel').hidden = true; delete $('askPanel').dataset.key; }
 $('askForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const key = $('askPanel').dataset.key, a = $('askA').value.trim().slice(0, 80);
   if (!key || !a) return;
+  const n = favToday();
+  setFavToday(n + 1);   // counted first so the next question shows straight away
   try {
     await set(ref(db, `profile/favorites/${key}`), { a, at: Date.now() });
-    doneAsking(); toast('Saved. Thanks! ✨');
-  } catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+    toast(n + 1 >= FAV_PER_DAY ? "That's all for today. Thanks! ✨" : 'Saved. One more! ✨');
+    renderAsk();
+  } catch (err) { setFavToday(n); alert(`That didn't save (${err.code || err.message}).`); }
 });
+// Skipping is free: it doesn't count, and brings up a different question.
 $('askSkip').addEventListener('click', () => {
   const key = $('askPanel').dataset.key;
-  if (key) store('wishlist.favSkipped', JSON.stringify([...new Set([...skippedFavs(), key])]));
-  doneAsking();
+  if (!key) return;
+  let skipped = [...new Set([...skippedFavs(), key])];
+  if (FAV_Q.filter((q) => !favText(q.key)).every((q) => skipped.includes(q.key))) skipped = [key];   // everything skipped: start over
+  setSkippedFavs(skipped);
+  renderAsk();
 });
 
 // The "Favorite things" card + popup: everyone on the list can read it; owners can edit.
