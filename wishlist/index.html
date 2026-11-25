@@ -270,6 +270,9 @@
   @media (max-width: 480px) { .tidyrow select { width: 100%; } }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 60; background: var(--ink); color: var(--bg);
     padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow-lg); animation: pop .2s ease; }
+  .shareopts { display: flex; flex-direction: column; gap: 8px; }
+  #shareText { width: 100%; min-height: 220px; font: .92rem/1.5 var(--sans); resize: vertical; }
+  #shareDlg .actions { flex-wrap: wrap; }
   .trackersum { font-weight: 700; font-size: .95rem; }
   .trackerlist { display: flex; flex-direction: column; gap: 14px; }
   .tgroup h3 { margin: 0 0 6px; font-family: var(--display); font-size: 1.05rem; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -671,6 +674,26 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
+<dialog id="shareDlg" aria-labelledby="shareTitle">
+  <div class="sheet">
+    <div>
+      <h2 id="shareTitle">Gifts for Lilia</h2>
+      <p class="muted">Edit it however you like, then email it or copy it. Heads up: this tells her who gave what.</p>
+    </div>
+    <div class="shareopts">
+      <label class="check"><input type="checkbox" id="shareBoughtOnly" checked> <span>Only gifts marked bought <span class="muted" id="shareCount"></span></span></label>
+      <label class="check"><input type="checkbox" id="shareByPerson"> <span>Group by person <span class="muted">(handy for thank-you notes)</span></span></label>
+    </div>
+    <textarea id="shareText" rows="12" aria-label="The list"></textarea>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="shareClose">Close</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="shareCopy">Copy</button>
+      <button type="button" class="btn primary" id="shareEmail">Email to Lilia</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="trackerDlg" aria-labelledby="trackerTitle">
   <div class="sheet tracker">
     <div>
@@ -689,7 +712,7 @@
       <ul id="trackerOpenList"></ul>
     </details>
     <div class="actions">
-      <button type="button" class="btn ghost" id="trackerCopy">Copy as text</button>
+      <button type="button" class="btn" id="trackerShare">Email list to Lilia…</button>
       <span class="spacer"></span>
       <button type="button" class="btn primary" id="trackerClose">Done</button>
     </div>
@@ -743,14 +766,15 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.24',
+  number: '1.25',
   date: 'Nov 23',
-  whatsNew: 'A birthday countdown, and some speed-ups.',
+  whatsNew: 'Small improvements behind the scenes.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
-// Only these accounts get the Gift tracker (everything picked and bought). Not Lilia.
-const TRACKER_EMAILS = ['latona@gmail.com'];
+// The organizer: the one account that sees who is giving what (the Gift tracker, and the list to
+// email Lilia). Not Lilia herself, so the gifts stay a surprise.
+const ORGANIZER_EMAILS = ['latona@gmail.com'];
 // The list's owner never sees claims, so gifts stay a surprise.
 const SURPRISE_FOR = 'lilialatona@gmail.com';
 const OCCASIONS = { christmas: 'Christmas', birthday: 'Birthday' };
@@ -1005,8 +1029,8 @@ if ('IntersectionObserver' in window) {
 }
 
 // ---------- countdowns ----------
-// Both pills show together: Lilia's birthday (Oct 18) all year round, and Christmas
-// once it's within 75 days. Change the numbers to show either one earlier or later.
+// Both pills show together, the one coming up soonest first: Lilia's birthday (Oct 18) all year
+// round, and Christmas once it's within 75 days. Change the numbers to show either earlier or later.
 const COUNTDOWN_DAYS = { birthday: 366, christmas: 75 };
 (function countdown() {
   const now = new Date();
@@ -1020,7 +1044,7 @@ const COUNTDOWN_DAYS = { birthday: 366, christmas: 75 };
   const events = [
     { key: 'birthday', days: until(9, 18), text: (n) => (n === 0 ? '🎂 Happy birthday, Lilia!' : `🎂 ${plural(n)} until Lilia’s birthday`) },
     { key: 'christmas', days: until(11, 25), text: (n) => (n === 0 ? '🎄 Merry Christmas!' : `🎄 ${plural(n)} until Christmas`) },
-  ].filter((e) => e.days <= COUNTDOWN_DAYS[e.key]);
+  ].filter((e) => e.days <= COUNTDOWN_DAYS[e.key]).sort((x, y) => x.days - y.days);   // soonest first
   $('countdowns').replaceChildren(...events.map((e) => el('span', { className: 'countdown', textContent: e.text(e.days) })));
 })();
 
@@ -1304,8 +1328,8 @@ function render() {
       : 'Nothing to show for this filter.');
 }
 
-// ---------- Gift tracker (only TRACKER_EMAILS) ----------
-const canTrack = () => !!me && TRACKER_EMAILS.includes(me.email);
+// ---------- Gift tracker (organizer only) ----------
+const canTrack = () => !!me && ORGANIZER_EMAILS.includes(me.email);
 let trackerFilter = 'all';
 
 // One row per person per item: single-item claims and open-idea picks.
@@ -1366,15 +1390,58 @@ $('trackerBtn').addEventListener('click', () => { if (!canTrack()) return; rende
 $('trackerClose').addEventListener('click', () => $('trackerDlg').close());
 $('trackerDlg').addEventListener('click', (e) => { if (e.target === $('trackerDlg')) $('trackerDlg').close(); });
 $('trackerFilter').addEventListener('click', (e) => { const f = e.target.dataset && e.target.dataset.f; if (f) { trackerFilter = f; renderTracker(); } });
-$('trackerCopy').addEventListener('click', async () => {
+// The list to email Lilia (organizer only): what was gifted and who from, as plain text.
+// Items she removed are left out. "Bought" means the giver tapped Mark bought.
+function giftListText({ boughtOnly, byPerson }) {
+  const rows = trackerRows().filter((r) => !r.removed && (!boughtOnly || r.status === 'bought'));
+  const what = (r) => r.title + (r.note ? ` (${r.note})` : '');
+  const plan = (r) => (r.status === 'bought' ? '' : ' (planning)');
+  let body;
+  if (!rows.length) body = boughtOnly ? '(Nothing has been marked as bought yet.)' : '(Nothing has been picked yet.)';
+  else if (byPerson) {
+    const groups = {};
+    for (const r of rows) (groups[r.who] = groups[r.who] || []).push(r);
+    body = Object.entries(groups).sort(([x], [y]) => x.localeCompare(y)).map(([who, rs]) =>
+      `${who}\n` + rs.sort((x, y) => x.title.localeCompare(y.title)).map((r) => `  • ${what(r)}${plan(r)}`).join('\n')).join('\n\n');
+  } else {
+    body = rows.sort((x, y) => x.title.localeCompare(y.title) || x.who.localeCompare(y.who)).map((r) => `• ${what(r)} — from ${r.who}${plan(r)}`).join('\n');
+  }
+  return `Gifts for Lilia\n\n${body}\n`;
+}
+const shareDlg = $('shareDlg');
+function refreshShare() {
+  $('shareText').value = giftListText({ boughtOnly: $('shareBoughtOnly').checked, byPerson: $('shareByPerson').checked });
+  const c = trackerCounts(trackerRows().filter((r) => !r.removed));
+  $('shareCount').textContent = `(${c.bought} bought, ${c.planning} planning)`;
+}
+$('trackerShare').addEventListener('click', () => {
   if (!canTrack()) return;
-  const byPerson = {};
-  for (const r of trackerRows()) (byPerson[r.who] = byPerson[r.who] || []).push(r);
-  const text = Object.entries(byPerson).sort(([a], [b]) => a.localeCompare(b)).map(([who, rs]) =>
-    `${who}\n` + rs.map((r) => `  - ${r.title}${r.note ? ` (${r.note})` : ''}: ${r.status === 'bought' ? 'bought' : 'planning'}`).join('\n')).join('\n\n');
-  try { await navigator.clipboard.writeText(text); $('trackerCopy').textContent = 'Copied ✓'; }
-  catch (e) { $('trackerCopy').textContent = "Couldn't copy"; }
-  setTimeout(() => { $('trackerCopy').textContent = 'Copy as text'; }, 1800);
+  $('shareBoughtOnly').checked = true; $('shareByPerson').checked = false;
+  refreshShare(); shareDlg.showModal();
+});
+$('shareBoughtOnly').addEventListener('change', refreshShare);
+$('shareByPerson').addEventListener('change', refreshShare);
+$('shareClose').addEventListener('click', () => shareDlg.close());
+shareDlg.addEventListener('click', (e) => { if (e.target === shareDlg) shareDlg.close(); });
+$('shareCopy').addEventListener('click', async () => {
+  if (!canTrack()) return;
+  const b = $('shareCopy');
+  try { await navigator.clipboard.writeText($('shareText').value); b.textContent = 'Copied ✓'; }
+  catch (e) { $('shareText').select(); b.textContent = "Couldn't copy"; }
+  setTimeout(() => { b.textContent = 'Copy'; }, 1800);
+});
+function openMail(url) { const a = el('a', { href: url }); document.body.append(a); a.click(); a.remove(); }
+$('shareEmail').addEventListener('click', async () => {
+  if (!canTrack()) return;
+  const text = $('shareText').value;
+  let body = text, note = '';
+  // Mail apps cut off very long links, so a long list is copied instead and pasted into the email.
+  if (encodeURIComponent(text).length > 1500) {
+    try { await navigator.clipboard.writeText(text); body = '(Paste the list here.)'; note = 'List copied. Paste it into the email.'; }
+    catch (e) { body = text.slice(0, 700) + '\n…'; note = 'That list is long, so the email has only the start. Use Copy for the whole thing.'; }
+  }
+  openMail(`mailto:${SURPRISE_FOR}?subject=${encodeURIComponent('Gifts and who they’re from')}&body=${encodeURIComponent(body)}`);
+  if (note) toast(note, 4500);
 });
 
 // Someone's own additions and edits are never "new" to them.
@@ -1809,9 +1876,9 @@ form.addEventListener('submit', async (e) => {
 });
 
 // ---------- tidy up categories (owners): move things out of Misc, with a review first ----------
-function toast(msg) {
+function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2600);
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, ms);
 }
 const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc');
 
