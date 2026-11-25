@@ -8,7 +8,10 @@
 <title>Lilia's Wish List</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<!-- Fonts load in the background (media=print trick) so a slow font server can't hold up the first paint. -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet"></noscript>
 <style>
   :root {
     --bg: #fbf7f2;
@@ -83,7 +86,9 @@
   @media (prefers-reduced-motion: reduce) { .snow, .snow::after { animation: none; } }
 
   .hero-inner { position: relative; max-width: 1100px; margin: 0 auto; text-shadow: 0 1px 12px rgba(10, 20, 50, .35); }
-  .topline { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 32px; }
+  .topline { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; min-height: 32px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .who { padding-top: 6px; }
   .countdown {
     display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 500;
     background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 5px 12px;
@@ -475,7 +480,7 @@
   <div class="snow" aria-hidden="true"></div>
   <div class="hero-inner">
     <div class="topline">
-      <span class="countdown" id="countdown" hidden></span>
+      <div class="pills" id="countdowns"></div>
       <div id="who" class="who" hidden><span class="email" id="whoEmail"></span><button id="signOut" type="button">Sign out</button></div>
     </div>
     <h1>Lilia's <em>wish list</em></h1>
@@ -738,9 +743,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.23',
+  number: '1.24',
   date: 'Nov 23',
-  whatsNew: 'Pick or add a category when you list a wish, plus a quick Tidy-up for things in Misc.',
+  whatsNew: 'A birthday countdown, and some speed-ups.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -863,6 +868,34 @@ function showSnaplog() {
 }
 const nav = performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
 snaplog(`page load (${nav ? nav.type : 'unknown'})`);
+
+// How long each stage of loading took on this device, shown at the bottom of the #debug log.
+const marks = {};
+function tmark(name) {
+  if (marks[name] !== undefined) return;
+  marks[name] = Math.round(performance.now());
+  snaplog(`⏱ ${name}: ${(marks[name] / 1000).toFixed(2)}s`);
+}
+try {
+  new PerformanceObserver((list) => { for (const e of list.getEntries()) if (e.name === 'first-contentful-paint') tmark('first paint'); }).observe({ type: 'paint', buffered: true });
+} catch (e) {}
+document.addEventListener('DOMContentLoaded', () => tmark('page parsed'));
+tmark('Firebase files loaded');
+function afterListShown() {
+  tmark('list shown');
+  setTimeout(() => {
+    const imgs = [...document.querySelectorAll('#items img')].filter((i) => { const r = i.getBoundingClientRect(); return r.top < innerHeight && r.bottom > 0; });
+    Promise.all(imgs.map((i) => (i.complete ? 0 : new Promise((ok) => { i.addEventListener('load', ok); i.addEventListener('error', ok); }))))
+      .then(() => tmark('first photos loaded'));
+  }, 50);
+  setTimeout(() => {   // anything unusually slow, so we can see who to blame
+    try {
+      for (const x of performance.getEntriesByType('resource').filter((r) => r.duration > 400).sort((a, b) => b.duration - a.duration).slice(0, 4)) {
+        const u = new URL(x.name); snaplog(`🐢 ${u.host}${u.pathname.slice(0, 30)} took ${(x.duration / 1000).toFixed(2)}s`);
+      }
+    } catch (e) {}
+  }, 6000);
+}
 addEventListener('pageshow', (e) => { if (e.persisted) snaplog('pageshow from back/forward cache'); });
 addEventListener('pagehide', () => snaplog(`pagehide (y=${Math.round(scrollY)})`));
 document.addEventListener('visibilitychange', () => snaplog(`tab ${document.visibilityState}`));
@@ -971,17 +1004,24 @@ if ('IntersectionObserver' in window) {
     .observe(document.querySelector('.hero'));
 }
 
-// ---------- countdown ----------
-
+// ---------- countdowns ----------
+// Both pills show together: Lilia's birthday (Oct 18) all year round, and Christmas
+// once it's within 75 days. Change the numbers to show either one earlier or later.
+const COUNTDOWN_DAYS = { birthday: 366, christmas: 75 };
 (function countdown() {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let xmas = new Date(now.getFullYear(), 11, 25);
-  if (today > xmas) xmas = new Date(now.getFullYear() + 1, 11, 25);
-  const days = Math.round((xmas - today) / 864e5);
-  if (days > 75) return;
-  $('countdown').textContent = days === 0 ? '🎄 Merry Christmas!' : `🎄 ${days} day${days === 1 ? '' : 's'} until Christmas`;
-  $('countdown').hidden = false;
+  const until = (month, day) => {
+    let t = new Date(now.getFullYear(), month, day);
+    if (today > t) t = new Date(now.getFullYear() + 1, month, day);
+    return Math.round((t - today) / 864e5);
+  };
+  const plural = (n) => `${n} day${n === 1 ? '' : 's'}`;
+  const events = [
+    { key: 'birthday', days: until(9, 18), text: (n) => (n === 0 ? '🎂 Happy birthday, Lilia!' : `🎂 ${plural(n)} until Lilia’s birthday`) },
+    { key: 'christmas', days: until(11, 25), text: (n) => (n === 0 ? '🎄 Merry Christmas!' : `🎄 ${plural(n)} until Christmas`) },
+  ].filter((e) => e.days <= COUNTDOWN_DAYS[e.key]);
+  $('countdowns').replaceChildren(...events.map((e) => el('span', { className: 'countdown', textContent: e.text(e.days) })));
 })();
 
 // ---------- auth ----------
@@ -1021,6 +1061,7 @@ let signOutGrace = null;
 $('signOut').addEventListener('click', () => { signingOut = true; signOut(auth); });
 
 onAuthStateChanged(auth, (user) => {
+  tmark('sign-in state known');
   snaplog(`auth: ${user ? 'signed in' : 'signed out'}${signingOut ? ' (sign-out tapped)' : ''}`);
   // Firebase can re-announce the same signed-in user (e.g. after a token refresh or when the
   // tab wakes up). Re-subscribing would flash the loading view and throw the page back to the top.
@@ -1064,6 +1105,7 @@ function applyAuth(user) {
   show('loading');
 
   unsubs.push(onValue(ref(db, 'items'), (snap) => {
+    tmark('list data arrived');
     items = snap.val() || {};
     if (me && me.owner) {
       // A removed item is kept only until its claimer has seen the heads-up.
@@ -1073,6 +1115,7 @@ function applyAuth(user) {
     }
     render();
     show('list');
+    afterListShown();
     restoreScrollOnce();
   }, () => {
     $('deniedEmail').textContent = email;
@@ -1777,7 +1820,7 @@ function renderTidy() {
   if (!me || !me.owner) { panel.hidden = true; return; }
   const n = tidyItems().filter((it) => guessCategory(it)).length;
   panel.hidden = n === 0;
-  if (n) $('tidyText').textContent = `${n} thing${n === 1 ? '' : 's'} in Misc look like ${n === 1 ? 'it belongs' : 'they belong'} somewhere else. Review ${n === 1 ? 'it' : 'them'}, then move ${n === 1 ? 'it' : 'them all'} in one tap.`;
+  if (n) $('tidyText').textContent = `${n} thing${n === 1 ? '' : 's'} in Misc ${n === 1 ? 'looks like it belongs' : 'look like they belong'} somewhere else. Review ${n === 1 ? 'it' : 'them'}, then move ${n === 1 ? 'it' : 'them all'} in one tap.`;
 }
 
 let tidyRows = [];
