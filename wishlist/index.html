@@ -266,6 +266,7 @@
   .tidyrow input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--berry); flex: none; margin: 0; }
   .tidyrow select { flex: none; width: 10rem; padding: 6px 8px; font-size: .85rem; }
   .tidy .actions { position: sticky; bottom: 0; background: var(--surface); margin: 0 -2px; padding: 12px 2px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); z-index: 1; }
+  .tidybtns { display: flex; gap: 8px; align-items: center; }
   .tidyhead { margin: 10px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
   @media (max-width: 480px) { .tidyrow select { width: 100%; } }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 60; background: var(--ink); color: var(--bg);
@@ -558,7 +559,10 @@
         <h2>Tidy up categories</h2>
         <p class="muted" id="tidyText"></p>
       </div>
-      <button id="tidyBtn" class="btn primary" type="button">Review</button>
+      <div class="tidybtns">
+        <button id="tidyKeep" class="btn ghost" type="button">Keep as is</button>
+        <button id="tidyBtn" class="btn primary" type="button">Review</button>
+      </div>
     </section>
 
     <section id="importPanel" class="panel import" hidden>
@@ -813,7 +817,7 @@ const db = getDatabase(app);
 const VERSION = {
   number: '1.26',
   date: 'Nov 23',
-  whatsNew: 'A couple of quick questions each day, so your favorites build up in one place.',
+  whatsNew: 'A couple of quick questions each day, so your favorites build up in one place. The category Tidy-up now lets you keep things where they are.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -2035,6 +2039,9 @@ form.addEventListener('submit', async (e) => {
       ...readLinks(),
       price: F.price.value.trim(),
       category,
+      // She chose Misc herself (a new wish, or she changed the dropdown to it): don't offer to move it.
+      // Just editing the notes on something already in Misc doesn't count as a choice.
+      ...(category === 'misc' && (!editingId || catTouched) ? { catOk: true } : {}),
       image: F.image.value.trim(),
       notes: F.notes.value.trim(),
       top: F.top.checked,
@@ -2061,7 +2068,8 @@ function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, ms);
 }
-const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc');
+// Items someone chose to keep in Misc (catOk) are never offered again.
+const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc' && !it.catOk);
 
 function renderTidy() {
   const panel = $('tidyPanel');
@@ -2074,8 +2082,8 @@ function renderTidy() {
 let tidyRows = [];
 function updateTidyCount() {
   const n = tidyRows.filter((r) => r.check.checked && r.sel.value !== 'misc').length;
-  $('tidyApply').textContent = n ? `Move ${n} item${n === 1 ? '' : 's'}` : 'Nothing to move';
-  $('tidyApply').disabled = !n;
+  $('tidyApply').textContent = n ? `Move ${n} item${n === 1 ? '' : 's'}` : 'Keep all in Misc';
+  $('tidyApply').disabled = false;
 }
 function tidyRow(it, guess) {
   const img = safeUrl(it.image);
@@ -2108,14 +2116,29 @@ $('tidyBtn').addEventListener('click', () => {
 $('tidyCancel').addEventListener('click', () => $('tidyDlg').close());
 $('tidyDlg').addEventListener('click', (e) => { if (e.target === $('tidyDlg')) $('tidyDlg').close(); });
 $('tidyApply').addEventListener('click', async () => {
-  // Only the category changes, so nobody gets an "Updated since you picked this" notice.
+  // Only the category (and the "keep it here" flag) change, so nobody gets an "Updated since you picked this" notice.
   const updates = {};
-  for (const r of tidyRows) if (r.check.checked && r.sel.value !== 'misc') updates[`${r.id}/category`] = r.sel.value;
-  const n = Object.keys(updates).length;
-  if (!n) return;
+  let moved = 0;
+  for (const r of tidyRows) {
+    if (r.check.checked && r.sel.value !== 'misc') { updates[`${r.id}/category`] = r.sel.value; moved++; }
+    else updates[`${r.id}/catOk`] = true;   // she looked at it and chose to leave it: don't ask again
+  }
+  if (!Object.keys(updates).length) return;
   const b = $('tidyApply'); b.disabled = true;
-  try { await update(ref(db, 'items'), updates); $('tidyDlg').close(); toast(`Moved ${n} item${n === 1 ? '' : 's'} ✓`); }
-  catch (err) { alert(`That didn't save (${err.code || err.message}).`); b.disabled = false; }
+  try {
+    await update(ref(db, 'items'), updates); $('tidyDlg').close();
+    toast(moved ? `Moved ${moved} item${moved === 1 ? '' : 's'} ✓` : 'Okay, leaving everything in Misc ✓');
+  } catch (err) { alert(`That didn't save (${err.code || err.message}).`); b.disabled = false; }
+});
+// "Keep as is": the offered moves are all declined in one tap.
+$('tidyKeep').addEventListener('click', async () => {
+  const updates = {};
+  for (const it of tidyItems()) updates[`${it.id}/catOk`] = true;
+  if (!Object.keys(updates).length) return;
+  const b = $('tidyKeep'); b.disabled = true;
+  try { await update(ref(db, 'items'), updates); toast('Okay, leaving them in Misc ✓'); }
+  catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+  finally { b.disabled = false; }
 });
 
 // ---------- sizes & favorites ----------
