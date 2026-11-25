@@ -270,6 +270,19 @@
   @media (max-width: 480px) { .tidyrow select { width: 100%; } }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 60; background: var(--ink); color: var(--bg);
     padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow-lg); animation: pop .2s ease; }
+  .ask { display: block; }
+  .ask form { display: flex; flex-direction: column; gap: 10px; }
+  .ask .askkicker { margin: 0; font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold); }
+  .ask h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; line-height: 1.2; }
+  .ask input { width: 100%; }
+  .askbtns { display: flex; gap: 8px; justify-content: flex-end; }
+  .favlist { display: flex; flex-direction: column; gap: 8px; }
+  .favhead { margin: 8px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
+  .favrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); flex-wrap: wrap; }
+  .favrow .fq { flex: 0 0 100%; font-size: .78rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+  .favrow .fa { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .favrow.open .fa { color: var(--muted); font-weight: 400; }
+  .favrow input { flex: 1; min-width: 0; }
   .shareopts { display: flex; flex-direction: column; gap: 8px; }
   #shareText { width: 100%; min-height: 220px; font: .92rem/1.5 var(--sans); resize: vertical; }
   #shareDlg .actions { flex-wrap: wrap; }
@@ -528,6 +541,18 @@
     <div class="toolbar">
       <div class="seg" id="chips" role="group" aria-label="Show items for"></div>
     </div>
+    <section id="askPanel" class="panel import ask" hidden>
+      <form id="askForm">
+        <p class="askkicker">✨ Quick one for today</p>
+        <h2 id="askQ"></h2>
+        <input id="askA" maxlength="80" autocomplete="off" placeholder="Your answer" aria-label="Your answer">
+        <div class="askbtns">
+          <button type="button" class="btn ghost" id="askSkip">Skip</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </section>
+
     <section id="tidyPanel" class="panel import" hidden>
       <div>
         <h2>Tidy up categories</h2>
@@ -547,6 +572,12 @@
     <button id="profileCard" class="sizes-btn" type="button" hidden>
       <span class="ico" aria-hidden="true">👗</span>
       <span class="txt"><b>Sizes &amp; favorites</b><small id="sizesPreview"></small></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+
+    <button id="favBtn" class="sizes-btn" type="button" hidden>
+      <span class="ico" aria-hidden="true">⭐</span>
+      <span class="txt"><b>Favorite things</b><small id="favPreview"></small></span>
       <span class="chev" aria-hidden="true">›</span>
     </button>
 
@@ -674,6 +705,20 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
+<dialog id="favDlg" aria-labelledby="favTitle">
+  <div class="sheet">
+    <div>
+      <h2 id="favTitle">Lilia's favorite things</h2>
+      <p class="muted" id="favSub">Handy when you're shopping.</p>
+    </div>
+    <div id="favList" class="favlist"></div>
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="favClose">Done</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="shareDlg" aria-labelledby="shareTitle">
   <div class="sheet">
     <div>
@@ -766,9 +811,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.25',
+  number: '1.26',
   date: 'Nov 23',
-  whatsNew: 'Small improvements behind the scenes.',
+  whatsNew: 'A quick question now and then, so your favorites build up in one place.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -1152,6 +1197,8 @@ function applyAuth(user) {
     profileDenied = false;
     refreshCats(); renderChips();
     renderProfile();
+    renderFavorites();
+    renderAsk();
     renderImport();
   }, () => { profile = null; profileDenied = true; renderProfile(); renderImport(); }));
 
@@ -1327,6 +1374,105 @@ function render() {
       ? (me.owner ? 'Nothing here yet. Tap “Add a wish” to start the list.' : "Lilia hasn't added anything yet. Check back soon!")
       : 'Nothing to show for this filter.');
 }
+
+// ---------- favorites: one quick question a day for Lilia ----------
+// Answers live at profile/favorites/<key> = { a: 'answer', at: time }. Owners can write profile/ and
+// everyone on the list can read it, so no database rule changes are needed. To add or reorder
+// questions, edit this list.
+const FAV_Q = [
+  { key: 'restaurant', label: 'Restaurant', q: "What's your favorite restaurant?" },
+  { key: 'salty', label: 'Salty snack', q: "What's your favorite salty snack?" },
+  { key: 'hairties', label: 'Hair ties', q: 'What kind of hair ties do you like best?' },
+  { key: 'candy', label: 'Candy', q: "What's your favorite candy?" },
+  { key: 'drink', label: 'Drink order', q: "What's your go-to drink order (boba, coffee, anything)?" },
+  { key: 'icecream', label: 'Ice cream', q: "What's your favorite ice cream flavor?" },
+  { key: 'breakfast', label: 'Breakfast', q: "What's your favorite breakfast?" },
+  { key: 'scent', label: 'Scent', q: "What's a scent you love?" },
+  { key: 'nails', label: 'Nail polish', q: "What's your favorite nail polish color?" },
+  { key: 'lips', label: 'Lip balm or gloss', q: "What's your favorite lip balm or gloss?" },
+  { key: 'store', label: 'Store', q: "What's your favorite store to shop at?" },
+  { key: 'song', label: 'Song right now', q: "What's your favorite song right now?" },
+  { key: 'show', label: 'Show or movie', q: "What's your favorite show or movie?" },
+  { key: 'book', label: 'Book', q: "What's your favorite book?" },
+  { key: 'under10', label: 'Under $10', q: "What's a gift under $10 you'd love?" },
+  { key: 'wanted', label: 'Wanted for ages', q: "What's something you've wanted for ages?" },
+  { key: 'dayMaker', label: 'Day-maker', q: "What's a small thing that would make your day?" },
+];
+const favAnswers = () => (profile && profile.favorites) || {};
+const favText = (key) => String((favAnswers()[key] || {}).a || '').trim();
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const skippedFavs = () => { try { return JSON.parse(store('wishlist.favSkipped') || '[]'); } catch (e) { return []; } };
+
+// The next question to ask: the first unanswered one she hasn't skipped (skipped ones come back last).
+function nextFavQuestion() {
+  const open = FAV_Q.filter((q) => !favText(q.key));
+  if (!open.length) return null;
+  const skipped = skippedFavs();
+  return open.find((q) => !skipped.includes(q.key)) || open[0];
+}
+function renderAsk() {
+  const panel = $('askPanel');
+  const q = me && me.surprise && profile && !profileDenied && store('wishlist.askedDay') !== todayStr() ? nextFavQuestion() : null;
+  panel.hidden = !q;
+  if (!q) return;
+  if (panel.dataset.key !== q.key) { panel.dataset.key = q.key; $('askQ').textContent = q.q; $('askA').value = ''; }
+}
+function doneAsking() { store('wishlist.askedDay', todayStr()); $('askPanel').hidden = true; delete $('askPanel').dataset.key; }
+$('askForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const key = $('askPanel').dataset.key, a = $('askA').value.trim().slice(0, 80);
+  if (!key || !a) return;
+  try {
+    await set(ref(db, `profile/favorites/${key}`), { a, at: Date.now() });
+    doneAsking(); toast('Saved. Thanks! ✨');
+  } catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+});
+$('askSkip').addEventListener('click', () => {
+  const key = $('askPanel').dataset.key;
+  if (key) store('wishlist.favSkipped', JSON.stringify([...new Set([...skippedFavs(), key])]));
+  doneAsking();
+});
+
+// The "Favorite things" card + popup: everyone on the list can read it; owners can edit.
+let favEditing = null;
+function renderFavorites() {
+  const btnEl = $('favBtn');
+  const answered = FAV_Q.filter((q) => favText(q.key));
+  btnEl.hidden = !(me && profile && (answered.length || me.owner));
+  if (btnEl.hidden) return;
+  $('favPreview').textContent = answered.length
+    ? answered.slice(0, 3).map((q) => `${q.label}: ${favText(q.key)}`).join(' · ')
+    : 'Nothing yet. Tap to answer a few.';
+  if ($('favDlg').open) renderFavList();
+}
+function favRow(q, open) {
+  const key = q.key, row = el('div', { className: 'favrow' + (open ? ' open' : '') }, el('div', { className: 'fq', textContent: q.label }));
+  if (favEditing === key) {
+    const input = el('input', { value: favText(key), maxLength: 80, placeholder: q.q });
+    input.setAttribute('aria-label', q.q);
+    const save = async () => {
+      try { await (input.value.trim() ? set(ref(db, `profile/favorites/${key}`), { a: input.value.trim().slice(0, 80), at: Date.now() }) : remove(ref(db, `profile/favorites/${key}`))); favEditing = null; renderFavList(); }
+      catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    row.append(input, btn('Save', 'small primary', save), btn('Cancel', 'small ghost', () => { favEditing = null; renderFavList(); }));
+    setTimeout(() => { if (!touch) input.focus(); }, 0);
+  } else {
+    row.append(el('div', { className: 'fa', textContent: open ? q.q : favText(key) }));
+    if (me.owner) row.append(btn(open ? 'Answer' : 'Edit', 'small ghost', () => { favEditing = key; renderFavList(); }));
+  }
+  return row;
+}
+function renderFavList() {
+  const answered = FAV_Q.filter((q) => favText(q.key)), open = FAV_Q.filter((q) => !favText(q.key));
+  $('favSub').textContent = me.owner ? 'Answers show up here as they come in. You can edit any of them.' : "Handy when you're shopping.";
+  $('favList').replaceChildren(
+    ...answered.map((q) => favRow(q, false)),
+    ...(me.owner && open.length ? [el('div', { className: 'favhead', textContent: 'Not answered yet' }), ...open.map((q) => favRow(q, true))] : []));
+}
+$('favBtn').addEventListener('click', () => { favEditing = null; renderFavList(); $('favDlg').showModal(); });
+$('favClose').addEventListener('click', () => $('favDlg').close());
+$('favDlg').addEventListener('click', (e) => { if (e.target === $('favDlg')) $('favDlg').close(); });
 
 // ---------- Gift tracker (organizer only) ----------
 const canTrack = () => !!me && ORGANIZER_EMAILS.includes(me.email);
