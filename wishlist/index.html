@@ -277,6 +277,9 @@
   .ask h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; line-height: 1.2; }
   .ask input { width: 100%; }
   .askbtns { display: flex; gap: 8px; justify-content: flex-end; }
+  #sizesTabs { align-self: flex-start; }
+  .tabcount { opacity: .6; font-weight: 400; }
+  #paneFav > .muted { margin: 0 0 10px; }
   .favlist { display: flex; flex-direction: column; gap: 8px; }
   .favhead { margin: 8px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
   .favrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); flex-wrap: wrap; }
@@ -579,12 +582,6 @@
       <span class="chev" aria-hidden="true">›</span>
     </button>
 
-    <button id="favBtn" class="sizes-btn" type="button" hidden>
-      <span class="ico" aria-hidden="true">⭐</span>
-      <span class="txt"><b>Favorite things</b><small id="favPreview"></small></span>
-      <span class="chev" aria-hidden="true">›</span>
-    </button>
-
     <button id="trackerBtn" class="sizes-btn tracker-btn" type="button" hidden>
       <span class="ico" aria-hidden="true">🧾</span>
       <span class="txt"><b>Gift tracker</b><small id="trackerPreview"></small></span>
@@ -709,20 +706,6 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
-<dialog id="favDlg" aria-labelledby="favTitle">
-  <div class="sheet">
-    <div>
-      <h2 id="favTitle">Lilia's favorite things</h2>
-      <p class="muted" id="favSub">Handy when you're shopping.</p>
-    </div>
-    <div id="favList" class="favlist"></div>
-    <div class="actions">
-      <span class="spacer"></span>
-      <button type="button" class="btn primary" id="favClose">Done</button>
-    </div>
-  </div>
-</dialog>
-
 <dialog id="shareDlg" aria-labelledby="shareTitle">
   <div class="sheet">
     <div>
@@ -771,7 +754,15 @@
 <dialog id="sizesDlg" aria-labelledby="sizesTitle">
   <div class="sheet">
     <h2 id="sizesTitle">Lilia's sizes &amp; favorites</h2>
-    <dl id="profileRows" class="sizes"></dl>
+    <div class="seg" id="sizesTabs" role="group" aria-label="Show">
+      <button class="chip" type="button" id="tabSizes" data-tab="sizes" aria-pressed="true">Sizes</button>
+      <button class="chip" type="button" id="tabFav" data-tab="fav" aria-pressed="false">Favorites <span class="tabcount" id="favCount"></span></button>
+    </div>
+    <div id="paneSizes"><dl id="profileRows" class="sizes"></dl></div>
+    <div id="paneFav" hidden>
+      <p class="muted" id="favSub"></p>
+      <div id="favList" class="favlist"></div>
+    </div>
     <div class="actions">
       <button type="button" class="btn ghost" id="profileEdit" hidden>Edit</button>
       <span class="spacer"></span>
@@ -815,9 +806,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.26',
+  number: '1.27',
   date: 'Nov 23',
-  whatsNew: 'A couple of quick questions each day, so your favorites build up in one place. The category Tidy-up now lets you keep things where they are.',
+  whatsNew: 'Sizes and favorites now live together, with a tab for each.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -1201,7 +1192,6 @@ function applyAuth(user) {
     profileDenied = false;
     refreshCats(); renderChips();
     renderProfile();
-    renderFavorites();
     renderAsk();
     renderImport();
   }, () => { profile = null; profileDenied = true; renderProfile(); renderImport(); }));
@@ -1472,18 +1462,8 @@ $('askSkip').addEventListener('click', () => {
   renderAsk();
 });
 
-// The "Favorite things" card + popup: everyone on the list can read it; owners can edit.
+// Favorites tab: everyone on the list can read it; owners can edit.
 let favEditing = null;
-function renderFavorites() {
-  const btnEl = $('favBtn');
-  const answered = FAV_Q.filter((q) => favText(q.key));
-  btnEl.hidden = !(me && profile && (answered.length || me.owner));
-  if (btnEl.hidden) return;
-  $('favPreview').textContent = answered.length
-    ? answered.slice(0, 3).map((q) => `${q.label}: ${favText(q.key)}`).join(' · ')
-    : 'Nothing yet. Tap to answer a few.';
-  if ($('favDlg').open) renderFavList();
-}
 function favRow(q, open) {
   const key = q.key, row = el('div', { className: 'favrow' + (open ? ' open' : '') }, el('div', { className: 'fq', textContent: q.label }));
   if (favEditing === key) {
@@ -1509,9 +1489,6 @@ function renderFavList() {
     ...answered.map((q) => favRow(q, false)),
     ...(me.owner && open.length ? [el('div', { className: 'favhead', textContent: 'Not answered yet' }), ...open.map((q) => favRow(q, true))] : []));
 }
-$('favBtn').addEventListener('click', () => { favEditing = null; renderFavList(); $('favDlg').showModal(); });
-$('favClose').addEventListener('click', () => $('favDlg').close());
-$('favDlg').addEventListener('click', (e) => { if (e.target === $('favDlg')) $('favDlg').close(); });
 
 // ---------- Gift tracker (organizer only) ----------
 const canTrack = () => !!me && ORGANIZER_EMAILS.includes(me.email);
@@ -2143,24 +2120,54 @@ $('tidyKeep').addEventListener('click', async () => {
 
 // ---------- sizes & favorites ----------
 
+let aboutTab = 'sizes';
+const aboutHas = () => {
+  const text = (profile && profile.text || '').trim();
+  const answered = FAV_Q.filter((q) => favText(q.key));
+  return { text, answered, sizes: !!text || !!(me && me.owner), fav: answered.length > 0 || !!(me && me.owner) };
+};
+function setAboutTab(t) {
+  const has = aboutHas();
+  if (t === 'fav' && !has.fav) t = 'sizes';
+  if (t === 'sizes' && !has.sizes) t = 'fav';
+  aboutTab = t;
+  $('paneSizes').hidden = t !== 'sizes'; $('paneFav').hidden = t !== 'fav';
+  $('tabSizes').setAttribute('aria-pressed', String(t === 'sizes')); $('tabFav').setAttribute('aria-pressed', String(t === 'fav'));
+  $('profileEdit').hidden = !(me && me.owner && t === 'sizes');
+  if (t === 'fav') renderFavList();
+}
+
+// One card for both: sizes (a text list the owners edit) and favorites (her daily answers).
 function renderProfile() {
   const card = $('profileCard');
-  const text = (profile && profile.text || '').trim();
-  if (!me || !profile || (!text && !me.owner)) { card.hidden = true; return; }
+  const has = me && profile ? aboutHas() : null;
+  if (!has || !(has.sizes || has.fav)) { card.hidden = true; return; }
   card.hidden = false;
-  $('profileEdit').hidden = !me.owner;
-  const rows = text ? text.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  const rows = has.text ? has.text.split('\n').map((l) => l.trim()).filter(Boolean) : [];
   const labels = rows.map((l) => (l.indexOf(':') > 0 ? l.slice(0, l.indexOf(':')) : l).trim());
-  $('sizesPreview').textContent = rows.length ? labels.join(', ') : 'Not filled in yet. Tap to add.';
+  const n = has.answered.length;
+  $('sizesPreview').textContent = rows.length && n ? `${labels.slice(0, 3).join(', ')} · ${n} favorite${n === 1 ? '' : 's'}`
+    : rows.length ? labels.join(', ')
+    : n ? has.answered.slice(0, 3).map((q) => `${q.label}: ${favText(q.key)}`).join(' · ')
+    : 'Not filled in yet. Tap to add.';
   $('profileRows').replaceChildren(...(rows.length ? rows.flatMap((line) => {
     const i = line.indexOf(':');
     return i > 0
       ? [el('dt', { textContent: line.slice(0, i).trim() }), el('dd', { textContent: line.slice(i + 1).trim() })]
       : [el('dd', { className: 'full', textContent: line })];
   }) : [el('dd', { className: 'full muted', textContent: 'Add sizes, colors and favorites so people can shop with confidence.' })]));
+  $('favCount').textContent = n ? `(${n})` : '';
+  $('sizesTabs').hidden = !(has.sizes && has.fav);   // family see just the tab that has something
+  if (sizesDlg.open) setAboutTab(aboutTab);
 }
 const sizesDlg = $('sizesDlg');
-$('profileCard').addEventListener('click', () => sizesDlg.showModal());
+$('profileCard').addEventListener('click', () => {
+  favEditing = null;
+  const has = aboutHas();
+  setAboutTab(has.text || !has.fav ? 'sizes' : 'fav');
+  sizesDlg.showModal();
+});
+$('sizesTabs').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) { favEditing = null; setAboutTab(t.dataset.tab); } });
 $('sizesClose').addEventListener('click', () => sizesDlg.close());
 sizesDlg.addEventListener('click', (e) => { if (e.target === sizesDlg) sizesDlg.close(); });
 
