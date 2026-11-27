@@ -266,10 +266,24 @@
   .tidyrow input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--berry); flex: none; margin: 0; }
   .tidyrow select { flex: none; width: 10rem; padding: 6px 8px; font-size: .85rem; }
   .tidy .actions { position: sticky; bottom: 0; background: var(--surface); margin: 0 -2px; padding: 12px 2px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); z-index: 1; }
+  .tidybtns { display: flex; gap: 8px; align-items: center; }
   .tidyhead { margin: 10px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
   @media (max-width: 480px) { .tidyrow select { width: 100%; } }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 60; background: var(--ink); color: var(--bg);
     padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: .9rem; box-shadow: var(--shadow-lg); animation: pop .2s ease; }
+  .ask { display: block; }
+  .ask form { display: flex; flex-direction: column; gap: 10px; }
+  .ask .askkicker { margin: 0; font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold); }
+  .ask h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; line-height: 1.2; }
+  .ask input { width: 100%; }
+  .askbtns { display: flex; gap: 8px; justify-content: flex-end; }
+  .favlist { display: flex; flex-direction: column; gap: 8px; }
+  .favhead { margin: 8px 0 0; font: 600 .85rem var(--sans); color: var(--muted); }
+  .favrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); flex-wrap: wrap; }
+  .favrow .fq { flex: 0 0 100%; font-size: .78rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+  .favrow .fa { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .favrow.open .fa { color: var(--muted); font-weight: 400; }
+  .favrow input { flex: 1; min-width: 0; }
   .shareopts { display: flex; flex-direction: column; gap: 8px; }
   #shareText { width: 100%; min-height: 220px; font: .92rem/1.5 var(--sans); resize: vertical; }
   #shareDlg .actions { flex-wrap: wrap; }
@@ -528,12 +542,27 @@
     <div class="toolbar">
       <div class="seg" id="chips" role="group" aria-label="Show items for"></div>
     </div>
+    <section id="askPanel" class="panel import ask" hidden>
+      <form id="askForm">
+        <p class="askkicker" id="askKicker"></p>
+        <h2 id="askQ"></h2>
+        <input id="askA" maxlength="80" autocomplete="off" placeholder="Your answer" aria-label="Your answer">
+        <div class="askbtns">
+          <button type="button" class="btn ghost" id="askSkip">Skip</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </section>
+
     <section id="tidyPanel" class="panel import" hidden>
       <div>
         <h2>Tidy up categories</h2>
         <p class="muted" id="tidyText"></p>
       </div>
-      <button id="tidyBtn" class="btn primary" type="button">Review</button>
+      <div class="tidybtns">
+        <button id="tidyKeep" class="btn ghost" type="button">Keep as is</button>
+        <button id="tidyBtn" class="btn primary" type="button">Review</button>
+      </div>
     </section>
 
     <section id="importPanel" class="panel import" hidden>
@@ -547,6 +576,12 @@
     <button id="profileCard" class="sizes-btn" type="button" hidden>
       <span class="ico" aria-hidden="true">👗</span>
       <span class="txt"><b>Sizes &amp; favorites</b><small id="sizesPreview"></small></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+
+    <button id="favBtn" class="sizes-btn" type="button" hidden>
+      <span class="ico" aria-hidden="true">⭐</span>
+      <span class="txt"><b>Favorite things</b><small id="favPreview"></small></span>
       <span class="chev" aria-hidden="true">›</span>
     </button>
 
@@ -674,6 +709,20 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 
+<dialog id="favDlg" aria-labelledby="favTitle">
+  <div class="sheet">
+    <div>
+      <h2 id="favTitle">Lilia's favorite things</h2>
+      <p class="muted" id="favSub">Handy when you're shopping.</p>
+    </div>
+    <div id="favList" class="favlist"></div>
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="favClose">Done</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="shareDlg" aria-labelledby="shareTitle">
   <div class="sheet">
     <div>
@@ -766,9 +815,9 @@ const db = getDatabase(app);
 // Must match the owner emails in the database rules.
 // Bump with every change, and say what's new in a few words.
 const VERSION = {
-  number: '1.25',
+  number: '1.26',
   date: 'Nov 23',
-  whatsNew: 'Small improvements behind the scenes.',
+  whatsNew: 'A couple of quick questions each day, so your favorites build up in one place. The category Tidy-up now lets you keep things where they are.',
 };
 
 const OWNERS = ['lilialatona@gmail.com', 'latona@gmail.com'];
@@ -1152,6 +1201,8 @@ function applyAuth(user) {
     profileDenied = false;
     refreshCats(); renderChips();
     renderProfile();
+    renderFavorites();
+    renderAsk();
     renderImport();
   }, () => { profile = null; profileDenied = true; renderProfile(); renderImport(); }));
 
@@ -1327,6 +1378,140 @@ function render() {
       ? (me.owner ? 'Nothing here yet. Tap “Add a wish” to start the list.' : "Lilia hasn't added anything yet. Check back soon!")
       : 'Nothing to show for this filter.');
 }
+
+// ---------- favorites: two quick questions a day for Lilia ----------
+// Answers live at profile/favorites/<key> = { a: 'answer', at: time }. Owners can write profile/ and
+// everyone on the list can read it, so no database rule changes are needed. To add or reorder
+// questions, edit this list (they're asked in this order; her three picks first, then the ones that
+// help most with gift ideas).
+const FAV_PER_DAY = 2;   // answers needed each day; skipping doesn't count
+const FAV_Q = [
+  { key: 'restaurant', label: 'Restaurant', q: "What's your favorite restaurant?" },
+  { key: 'salty', label: 'Salty snack', q: "What's your favorite salty snack?" },
+  { key: 'hairties', label: 'Hair ties', q: 'What kind of hair ties do you like best?' },
+  { key: 'giftcard', label: 'Gift card spot', q: 'If someone gave you a gift card, where would you spend it first?' },
+  { key: 'sweats', label: 'Hoodie or sweats brand', q: 'What brand of hoodies or sweats do you like most?' },
+  { key: 'under10', label: 'Under $10', q: "What's a gift under $10 you'd love?" },
+  { key: 'wanted', label: 'Wanted for ages', q: "What's something you've wanted for ages?" },
+  { key: 'jewelry', label: 'Jewelry style', q: 'What jewelry style do you like (gold, silver, colorful, dainty)?' },
+  { key: 'socks', label: 'Socks', q: "What's your favorite kind of socks?" },
+  { key: 'pen', label: 'Pen or marker', q: "What's your favorite pen or marker?" },
+  { key: 'skincare', label: 'Skincare or body product', q: "What's a skincare or body product you'd happily get again?" },
+  { key: 'bag', label: 'Bag brand', q: 'What bag or backpack brand do you like?' },
+  { key: 'lovedgift', label: 'A gift she still loves', q: "What's a gift you got once and still love?" },
+  { key: 'notgift', label: 'Rather not get', q: "Is there something you'd rather NOT get as a gift?" },
+  { key: 'candy', label: 'Candy', q: "What's your favorite candy?" },
+  { key: 'drink', label: 'Drink order', q: "What's your go-to drink order (boba, coffee, anything)?" },
+  { key: 'icecream', label: 'Ice cream', q: "What's your favorite ice cream flavor?" },
+  { key: 'breakfast', label: 'Breakfast', q: "What's your favorite breakfast?" },
+  { key: 'scent', label: 'Scent', q: "What's a scent you love?" },
+  { key: 'nails', label: 'Nail polish', q: "What's your favorite nail polish color?" },
+  { key: 'lips', label: 'Lip balm or gloss', q: "What's your favorite lip balm or gloss?" },
+  { key: 'store', label: 'Store', q: "What's your favorite store to shop at?" },
+  { key: 'dayMaker', label: 'Day-maker', q: "What's a small thing that would make your day?" },
+  { key: 'fastfood', label: 'Fast food', q: "What's your go-to fast-food order?" },
+  { key: 'pizza', label: 'Pizza topping', q: "What's your favorite pizza topping?" },
+  { key: 'dessert', label: 'Sweet treat', q: "What's your favorite dessert or sweet treat?" },
+  { key: 'comfort', label: 'Comfort food', q: "What's your comfort food on a bad day?" },
+  { key: 'song', label: 'Song right now', q: "What's your favorite song right now?" },
+  { key: 'show', label: 'Show or movie', q: "What's your favorite show or movie?" },
+  { key: 'movie', label: 'Movie to rewatch', q: "What's a movie you'd happily watch again?" },
+  { key: 'book', label: 'Book', q: "What's your favorite book?" },
+  { key: 'band', label: 'Band or artist', q: "Who's your favorite band or artist?" },
+  { key: 'game', label: 'Game or app', q: "What's your favorite game or app right now?" },
+  { key: 'emoji', label: 'Emoji', q: "What's your favorite emoji?" },
+  { key: 'season', label: 'Season', q: "What's your favorite season?" },
+  { key: 'dayoff', label: 'Day off', q: "What's your favorite thing to do on a day off?" },
+  { key: 'hangout', label: 'Hangout spot', q: 'Where do you like to hang out with friends?' },
+];
+const favAnswers = () => (profile && profile.favorites) || {};
+const favText = (key) => String((favAnswers()[key] || {}).a || '').trim();
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// Skipping means "not today": skipped questions go to the back of the line, and tomorrow they get another chance.
+const skippedFavs = () => { try { const d = JSON.parse(store('wishlist.favSkipped') || 'null'); return d && d.day === todayStr() ? d.keys : []; } catch (e) { return []; } };
+const setSkippedFavs = (keys) => store('wishlist.favSkipped', JSON.stringify({ day: todayStr(), keys }));
+// How many she has answered today on this device (answering in the Favorite things popup doesn't count).
+const favToday = () => { try { const d = JSON.parse(store('wishlist.favDay') || 'null'); return d && d.day === todayStr() ? d.n : 0; } catch (e) { return 0; } };
+const setFavToday = (n) => store('wishlist.favDay', JSON.stringify({ day: todayStr(), n }));
+
+// The next question to ask: the first unanswered one she hasn't skipped (skipped ones come back last).
+function nextFavQuestion() {
+  const open = FAV_Q.filter((q) => !favText(q.key));
+  if (!open.length) return null;
+  const skipped = skippedFavs();
+  return open.find((q) => !skipped.includes(q.key)) || open[0];
+}
+function renderAsk() {
+  const panel = $('askPanel');
+  const n = favToday();
+  const q = me && me.surprise && profile && !profileDenied && n < FAV_PER_DAY ? nextFavQuestion() : null;
+  panel.hidden = !q;
+  if (!q) return;
+  $('askKicker').textContent = `✨ Today's questions · ${n + 1} of ${FAV_PER_DAY}`;
+  if (panel.dataset.key !== q.key) { panel.dataset.key = q.key; $('askQ').textContent = q.q; $('askA').value = ''; }
+}
+$('askForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const key = $('askPanel').dataset.key, a = $('askA').value.trim().slice(0, 80);
+  if (!key || !a) return;
+  const n = favToday();
+  setFavToday(n + 1);   // counted first so the next question shows straight away
+  try {
+    await set(ref(db, `profile/favorites/${key}`), { a, at: Date.now() });
+    toast(n + 1 >= FAV_PER_DAY ? "That's all for today. Thanks! ✨" : 'Saved. One more! ✨');
+    renderAsk();
+  } catch (err) { setFavToday(n); alert(`That didn't save (${err.code || err.message}).`); }
+});
+// Skipping is free: it doesn't count, and brings up a different question.
+$('askSkip').addEventListener('click', () => {
+  const key = $('askPanel').dataset.key;
+  if (!key) return;
+  let skipped = [...new Set([...skippedFavs(), key])];
+  if (FAV_Q.filter((q) => !favText(q.key)).every((q) => skipped.includes(q.key))) skipped = [key];   // everything skipped: start over
+  setSkippedFavs(skipped);
+  renderAsk();
+});
+
+// The "Favorite things" card + popup: everyone on the list can read it; owners can edit.
+let favEditing = null;
+function renderFavorites() {
+  const btnEl = $('favBtn');
+  const answered = FAV_Q.filter((q) => favText(q.key));
+  btnEl.hidden = !(me && profile && (answered.length || me.owner));
+  if (btnEl.hidden) return;
+  $('favPreview').textContent = answered.length
+    ? answered.slice(0, 3).map((q) => `${q.label}: ${favText(q.key)}`).join(' · ')
+    : 'Nothing yet. Tap to answer a few.';
+  if ($('favDlg').open) renderFavList();
+}
+function favRow(q, open) {
+  const key = q.key, row = el('div', { className: 'favrow' + (open ? ' open' : '') }, el('div', { className: 'fq', textContent: q.label }));
+  if (favEditing === key) {
+    const input = el('input', { value: favText(key), maxLength: 80, placeholder: q.q });
+    input.setAttribute('aria-label', q.q);
+    const save = async () => {
+      try { await (input.value.trim() ? set(ref(db, `profile/favorites/${key}`), { a: input.value.trim().slice(0, 80), at: Date.now() }) : remove(ref(db, `profile/favorites/${key}`))); favEditing = null; renderFavList(); }
+      catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    row.append(input, btn('Save', 'small primary', save), btn('Cancel', 'small ghost', () => { favEditing = null; renderFavList(); }));
+    setTimeout(() => { if (!touch) input.focus(); }, 0);
+  } else {
+    row.append(el('div', { className: 'fa', textContent: open ? q.q : favText(key) }));
+    if (me.owner) row.append(btn(open ? 'Answer' : 'Edit', 'small ghost', () => { favEditing = key; renderFavList(); }));
+  }
+  return row;
+}
+function renderFavList() {
+  const answered = FAV_Q.filter((q) => favText(q.key)), open = FAV_Q.filter((q) => !favText(q.key));
+  $('favSub').textContent = me.owner ? 'Answers show up here as they come in. You can edit any of them.' : "Handy when you're shopping.";
+  $('favList').replaceChildren(
+    ...answered.map((q) => favRow(q, false)),
+    ...(me.owner && open.length ? [el('div', { className: 'favhead', textContent: 'Not answered yet' }), ...open.map((q) => favRow(q, true))] : []));
+}
+$('favBtn').addEventListener('click', () => { favEditing = null; renderFavList(); $('favDlg').showModal(); });
+$('favClose').addEventListener('click', () => $('favDlg').close());
+$('favDlg').addEventListener('click', (e) => { if (e.target === $('favDlg')) $('favDlg').close(); });
 
 // ---------- Gift tracker (organizer only) ----------
 const canTrack = () => !!me && ORGANIZER_EMAILS.includes(me.email);
@@ -1854,6 +2039,9 @@ form.addEventListener('submit', async (e) => {
       ...readLinks(),
       price: F.price.value.trim(),
       category,
+      // She chose Misc herself (a new wish, or she changed the dropdown to it): don't offer to move it.
+      // Just editing the notes on something already in Misc doesn't count as a choice.
+      ...(category === 'misc' && (!editingId || catTouched) ? { catOk: true } : {}),
       image: F.image.value.trim(),
       notes: F.notes.value.trim(),
       top: F.top.checked,
@@ -1880,7 +2068,8 @@ function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, ms);
 }
-const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc');
+// Items someone chose to keep in Misc (catOk) are never offered again.
+const tidyItems = () => Object.entries(items).map(([id, it]) => ({ id, ...it })).filter((it) => it.title && !it.removed && catOf(it) === 'misc' && !it.catOk);
 
 function renderTidy() {
   const panel = $('tidyPanel');
@@ -1893,8 +2082,8 @@ function renderTidy() {
 let tidyRows = [];
 function updateTidyCount() {
   const n = tidyRows.filter((r) => r.check.checked && r.sel.value !== 'misc').length;
-  $('tidyApply').textContent = n ? `Move ${n} item${n === 1 ? '' : 's'}` : 'Nothing to move';
-  $('tidyApply').disabled = !n;
+  $('tidyApply').textContent = n ? `Move ${n} item${n === 1 ? '' : 's'}` : 'Keep all in Misc';
+  $('tidyApply').disabled = false;
 }
 function tidyRow(it, guess) {
   const img = safeUrl(it.image);
@@ -1927,14 +2116,29 @@ $('tidyBtn').addEventListener('click', () => {
 $('tidyCancel').addEventListener('click', () => $('tidyDlg').close());
 $('tidyDlg').addEventListener('click', (e) => { if (e.target === $('tidyDlg')) $('tidyDlg').close(); });
 $('tidyApply').addEventListener('click', async () => {
-  // Only the category changes, so nobody gets an "Updated since you picked this" notice.
+  // Only the category (and the "keep it here" flag) change, so nobody gets an "Updated since you picked this" notice.
   const updates = {};
-  for (const r of tidyRows) if (r.check.checked && r.sel.value !== 'misc') updates[`${r.id}/category`] = r.sel.value;
-  const n = Object.keys(updates).length;
-  if (!n) return;
+  let moved = 0;
+  for (const r of tidyRows) {
+    if (r.check.checked && r.sel.value !== 'misc') { updates[`${r.id}/category`] = r.sel.value; moved++; }
+    else updates[`${r.id}/catOk`] = true;   // she looked at it and chose to leave it: don't ask again
+  }
+  if (!Object.keys(updates).length) return;
   const b = $('tidyApply'); b.disabled = true;
-  try { await update(ref(db, 'items'), updates); $('tidyDlg').close(); toast(`Moved ${n} item${n === 1 ? '' : 's'} ✓`); }
-  catch (err) { alert(`That didn't save (${err.code || err.message}).`); b.disabled = false; }
+  try {
+    await update(ref(db, 'items'), updates); $('tidyDlg').close();
+    toast(moved ? `Moved ${moved} item${moved === 1 ? '' : 's'} ✓` : 'Okay, leaving everything in Misc ✓');
+  } catch (err) { alert(`That didn't save (${err.code || err.message}).`); b.disabled = false; }
+});
+// "Keep as is": the offered moves are all declined in one tap.
+$('tidyKeep').addEventListener('click', async () => {
+  const updates = {};
+  for (const it of tidyItems()) updates[`${it.id}/catOk`] = true;
+  if (!Object.keys(updates).length) return;
+  const b = $('tidyKeep'); b.disabled = true;
+  try { await update(ref(db, 'items'), updates); toast('Okay, leaving them in Misc ✓'); }
+  catch (err) { alert(`That didn't save (${err.code || err.message}).`); }
+  finally { b.disabled = false; }
 });
 
 // ---------- sizes & favorites ----------
